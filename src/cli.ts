@@ -1,15 +1,14 @@
 import { randomInt } from "node:crypto";
 import { parseArgs } from "node:util";
 import { findTrack } from "./analysis.ts";
+import { askLive } from "./live.ts";
 import { MODELS, modelInfo } from "./models.ts";
 import { PROVIDER_LABELS, providerFor, usesBatchApi } from "./providers/index.ts";
 import { isOpenRouterModel, registerOpenRouterModel } from "./providers/openrouter.ts";
-import { generateQuestionSet, type Question, type QuestionSet } from "./questions/index.ts";
+import { generateQuestionSet, type QuestionSet } from "./questions/index.ts";
 import { batchReport, probeReport } from "./report.ts";
-import { DEFAULT_SETTINGS, estimateCost, type ProviderClient, type Result, type Settings } from "./run.ts";
+import { DEFAULT_SETTINGS, estimateCost, type Settings } from "./run.ts";
 import { createRun, listRuns, loadMeta, loadQuestionSet, loadResults, saveQuestionSet, saveResults } from "./store.ts";
-
-const LIVE_CONCURRENCY = 4; // full runs without a batch API: questions asked at the same time
 
 const HELP = `Usage: ./nerf <command> [options]
 
@@ -77,22 +76,6 @@ async function generate() {
   }
 }
 
-// Asks questions live, a few at a time, showing progress.
-async function askLive(provider: ProviderClient, questions: Question[], set: QuestionSet, settings: Settings) {
-  const results: Result[] = [];
-  let next = 0;
-  const worker = async () => {
-    while (next < questions.length) {
-      const q = questions[next++];
-      results.push(await provider.runLive(q, set, settings));
-      process.stdout.write(`\r${results.length}/${questions.length} answered`);
-    }
-  };
-  await Promise.all(Array.from({ length: LIVE_CONCURRENCY }, worker));
-  process.stdout.write("\n");
-  return results;
-}
-
 async function submit() {
   const set = loadQuestionSet();
   const settings = await settingsFromFlags();
@@ -111,7 +94,7 @@ async function submit() {
     ...(await provider.fetchModelInfo(settings.model)),
   };
 
-  if (provider.batch) {
+  if (batch && provider.batch) {
     const batchId = await provider.batch.submit(set, set.questions, settings);
     const run = createRun({ ...base, batchId });
     console.log(`\nSubmitted as run ${run.id} (batch ${batchId}).`);
@@ -122,7 +105,11 @@ async function submit() {
   // shows up before anything is paid for; its results are saved once every question is answered.
   const run = createRun(base);
   console.log("");
-  const results = await askLive(provider, set.questions, set, settings);
+  const results = await askLive(provider, set.questions, set, settings, {
+    onProgress: (answered, total) => process.stdout.write(`\r${answered}/${total} answered`),
+    onPause: (limited, ms) => process.stdout.write(`\n${limited} hit the rate limit; asking them again in ${ms / 1000}s\n`),
+  });
+  process.stdout.write("\n");
   saveResults(run.id, results);
   console.log(`\n${batchReport(run, results, probeIds(set), findTrack(run))}`);
 }
@@ -149,6 +136,7 @@ async function collect() {
       continue;
     }
 
+    if (isOpenRouterModel(run.settings.model)) await registerOpenRouterModel(run.settings.model);
     const outcome = await providerFor(run.settings.model).batch!.collect(run, set);
     if (!outcome.done) {
       const c = outcome.counts;

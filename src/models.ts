@@ -17,6 +17,7 @@ export type ModelInfo = {
   name: string;
   efforts: readonly string[]; // accepted --effort values; all models accept "high", the default
   price: Price;
+  batch?: boolean; // OpenRouter models only: whether full runs can use its Batch API
 };
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;

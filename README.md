@@ -59,16 +59,17 @@ Use the same `--model` and `--effort` for `submit` and `probe`, so the live prob
 | OpenAI | `gpt-6-astra`, `gpt-6-sol`, `gpt-5.5` | `OPENAI_API_KEY` | Batch API, half price |
 | xAI | `grok-4.7`, `grok-4.6` | `XAI_API_KEY` | live |
 | Meta | `muse-spark-1.3`, `muse-spark-1.2` | `META_API_KEY` | live |
-| OpenRouter | any model on OpenRouter, as `openrouter/<id>` | `OPENROUTER_API_KEY` | live |
+| OpenRouter | any model on OpenRouter, as `openrouter/<id>` | `OPENROUTER_API_KEY` | Batch API when the model has one, otherwise live |
 
 `./nerf models` lists the same models with their prices and the thinking levels each one accepts. Levels differ by model (xAI's stop at `xhigh`; some OpenAI models also take `none`), but every model accepts `high`, the default. Any other model name or level stops before anything is sent.
 
-**Full runs** go through the provider's batch API when NerfWatch uses one: results come back later through `./nerf collect`, at half price. xAI, Meta and OpenRouter runs are asked live instead, a few questions at a time, and the report prints as soon as the run finishes. xAI's batch API doesn't document its discount or result format clearly yet, and Meta and OpenRouter don't have one. On xAI and Meta a full run costs roughly $1–2; on OpenRouter it depends on the model.
+**Full runs** go through the provider's batch API when NerfWatch uses one: results come back later through `./nerf collect`, at half price. xAI and Meta runs, and OpenRouter models without a batch option, are asked live instead, a few questions at a time, and the report prints as soon as the run finishes. xAI's batch API doesn't document its discount or result format clearly yet, and Meta doesn't have one. On xAI and Meta a full run costs roughly $1–2; on OpenRouter it depends on the model. Live runs that hit a rate limit wait a minute and ask those questions again, up to 3 times.
 
 **OpenRouter:** use the model's OpenRouter id with `openrouter/` in front, for example `--model openrouter/google/gemini-3.1-pro`. Its name, release date and prices come from OpenRouter's model list, and each answer's cost is what OpenRouter reports it charged. Thinking levels are OpenRouter's: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; use `none` for models that don't think.
 
 - **Pin the provider.** OpenRouter can serve a model from different companies and switch between them, and a different provider can score differently, which would look like a nerf. Add `@<provider>` to pin one, for example `openrouter/google/gemini-3.1-pro@google-vertex`, and fallbacks are turned off. Pinned and unpinned runs get separate baselines. When OpenRouter says which provider served an answer, that's saved with it too.
-- **Privacy.** Every request asks OpenRouter to skip providers that may keep or train on your prompts (`data_collection: deny`), and providers that would ignore the thinking level.
+- **Batch API.** When OpenRouter offers a model's `:batch` variant, and your pinned provider serves it, full runs go through OpenRouter's Batch API at half price and come back through `./nerf collect`.
+- **Privacy.** Live requests ask OpenRouter to skip providers that may keep or train on your prompts (`data_collection: deny`), and providers that would ignore the thinking level. Batches can't carry that setting (a pinned provider is the only routing option they accept), so OpenRouter applies your account's data policy instead: set it in OpenRouter's privacy settings.
 
 **Meta:** only the Standard tier is supported. Meta's cheaper `-contributor` models may be trained on what you send them, including your questions.
 

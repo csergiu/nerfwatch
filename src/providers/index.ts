@@ -8,7 +8,7 @@ import { RESPONSES_PROVIDERS, responsesProvider } from "./responses.ts";
 // Known without an API key, so dry runs can price them.
 export function usesBatchApi(model: string): boolean {
   const { provider } = modelInfo(model);
-  if (provider === "openrouter") return false;
+  if (provider === "openrouter") return modelInfo(model).batch === true; // looked up in OpenRouter's model list
   return provider === "anthropic" || RESPONSES_PROVIDERS[provider].batchApi;
 }
 

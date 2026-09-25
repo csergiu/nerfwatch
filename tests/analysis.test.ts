@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { baselineSentence, buildTrack, compare, verdictSentence } from "../src/analysis.ts";
-import type { Result, RunMeta } from "../src/claude.ts";
+import type { Result, RunMeta } from "../src/run.ts";
 
 const settings = { model: "claude-opus-5", effort: "high" as const, maxTokens: 16000 };
 

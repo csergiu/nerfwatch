@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { QuestionSet } from "./questions/index.ts";
-import type { Result, RunMeta } from "./claude.ts";
+import type { Result, RunMeta } from "./run.ts";
 
 const QUESTIONS_PATH = "data/questions.json";
 const RUNS_DIR = "runs";
@@ -21,12 +21,24 @@ export function saveQuestionSet(set: QuestionSet, force: boolean): string {
   return QUESTIONS_PATH;
 }
 
+// Ids start with the time, so they sort by it, and include the model, so runs for different
+// models started in the same minute don't collide. Creating the folder claims the id.
 export function createRun(meta: Omit<RunMeta, "id">): RunMeta {
-  const stamp = new Date().toISOString().slice(0, 16).replace(/:/g, "");
-  const run = { ...meta, id: `${stamp}-${meta.kind}` };
-  fs.mkdirSync(path.join(RUNS_DIR, run.id), { recursive: true });
-  saveMeta(run);
-  return run;
+  const stamp = meta.createdAt.slice(0, 16).replace(/:/g, "");
+  const base = `${stamp}-${meta.settings.model}-${meta.kind}`;
+  fs.mkdirSync(RUNS_DIR, { recursive: true });
+  for (let n = 1; ; n++) {
+    const id = n === 1 ? base : `${base}-${n}`;
+    try {
+      fs.mkdirSync(path.join(RUNS_DIR, id));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+      throw error;
+    }
+    const run = { ...meta, id };
+    saveMeta(run);
+    return run;
+  }
 }
 
 export function saveMeta(run: RunMeta) {

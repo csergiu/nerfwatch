@@ -2,7 +2,7 @@
 
 Checks whether an AI model has gotten worse ("nerfed") since you started watching it. It asks the model the same private, automatically graded questions on a schedule and compares each result with a fixed baseline.
 
-It tests Anthropic's Claude models through the API, one model per run. You choose which one; see [Choosing a model](#choosing-a-model).
+It tests models from Anthropic, OpenAI, xAI and Meta through their APIs, one model per run. You choose which; see [Choosing a model](#choosing-a-model).
 
 ## How it works
 
@@ -29,7 +29,7 @@ Needs Node 24 or later.
 
 ```bash
 npm install
-cp .env.example .env    # then add your Anthropic API key
+cp .env.example .env    # then add the API key for each provider you'll test
 ./nerf generate         # creates your private question set in data/
 ./nerf submit           # dry run: shows the estimated cost, sends nothing
 ./nerf submit --yes     # sends the 100 questions to Claude Opus 5 through the Batch API (half price)
@@ -45,26 +45,34 @@ Every request and answer is saved in `runs/<run id>/`, so you can check the grad
 Each run tests one model. Pick it with `--model`, and how much it's allowed to think with `--effort`:
 
 ```bash
-./nerf submit --yes --model claude-sonnet-5 --effort medium
-./nerf probe --yes --model claude-sonnet-5 --effort medium
+./nerf submit --yes --model gpt-6-astra --effort medium
+./nerf probe --yes --model gpt-6-astra --effort medium
 ```
 
-Use the same `--model` and `--effort` for `submit` and `probe`, so the live probe matches the batch runs it sits next to.
+Use the same `--model` and `--effort` for `submit` and `probe`, so the live probe matches the full runs it sits next to.
 
-| Option | Values | Default |
-|---|---|---|
-| `--model` | `claude-opus-5`, `claude-opus-5-5`, `claude-sonnet-5`, `claude-fable-5-1` | `claude-opus-5` |
-| `--effort` | `low`, `medium`, `high`, `xhigh`, `max` | `high` |
+| Provider | Models | Key in `.env` | Full runs |
+|---|---|---|---|
+| Anthropic | `claude-opus-5` (default), `claude-opus-5-5`, `claude-sonnet-5`, `claude-fable-5-1` | `ANTHROPIC_API_KEY` | Batch API, half price |
+| OpenAI | `gpt-6-astra`, `gpt-6-sol`, `gpt-5.5` | `OPENAI_API_KEY` | Batch API, half price |
+| xAI | `grok-4.7`, `grok-4.6` | `XAI_API_KEY` | live |
+| Meta | `muse-spark-1.3`, `muse-spark-1.2` | `META_API_KEY` | live |
 
-These are the models with prices in `src/pricing.ts`. Any other name stops before anything is sent. To add a model, add its price there. It also has to accept adaptive thinking and an effort level: older models such as Claude Haiku 4.5 don't, and would need changes to `src/claude.ts`.
+`./nerf models` lists the same models with their prices and the thinking levels each one accepts. Levels differ by model (xAI's stop at `xhigh`; some OpenAI models also take `none`), but every model accepts `high`, the default. Any other model name or level stops before anything is sent.
 
-**Testing several models:** run `submit` and `probe` once per model. Each model and effort level gets its own baseline and verdict, since scores are only compared with the same model's earlier runs. Costs add up per model. One `./nerf collect` fetches every finished batch, whichever model it's for, and lists the ones still processing.
+**Full runs** go through the provider's batch API when NerfWatch uses one: results come back later through `./nerf collect`, at half price. xAI and Meta runs are asked live instead, a few questions at a time, and the report prints as soon as the run finishes. xAI's batch API doesn't document its discount or result format clearly yet, and Meta doesn't have one. Both are cheap: a full run costs roughly $1–2.
+
+**Meta:** only the Standard tier is supported. Meta's cheaper `-contributor` models may be trained on what you send them, which would put your private questions into their training data.
+
+**Testing several models:** run `submit` and `probe` once per model. Each model and effort level gets its own baseline and verdict, since scores are only compared with the same model's earlier runs, never with other models. Costs add up per model. One `./nerf collect` fetches every finished batch, whichever model it's for, and lists the ones still processing.
+
+**Adding a model:** add it to `src/models.ts` with its provider, thinking levels and prices. A model from another provider also needs a client in `src/providers/`. Providers that serve the Responses API, like OpenAI, xAI and Meta, only need an entry in `src/providers/responses.ts`.
 
 ## Cost
 
-`submit` and `probe` show an estimate and send nothing unless you add `--yes`. On Claude Opus 5 the estimate is about $3 for a batch run of 100 questions and $0.40 for a live probe. How much the model thinks is the biggest factor, so check the first report for the real number. Each report gives the real cost and projects a monthly cost per model for a run every 2nd day.
+`submit` and `probe` show an estimate and send nothing unless you add `--yes`. For example, on Claude Opus 5 the estimate is about $3 for a batch run of 100 questions and $0.40 for a live probe. How much the model thinks is the biggest factor, so check the first report for the real number. Each report gives the real cost and projects a monthly cost per model for a run every 2nd day.
 
-Prices live in `src/pricing.ts` (list prices, mid-2026). Update them when they change.
+Prices live in `src/models.ts` (list prices, September 2026), with links to each provider's pricing page. Update them when they change.
 
 ## Keep your questions private
 
@@ -92,14 +100,16 @@ This tests the default model. For another model, add `--model <id>` to the `subm
 
 - It tests the API, not chat apps like Claude.ai, which add their own instructions and routing. It can't see subscription usage limits.
 - A verdict says that a score changed, not why.
-- Only Anthropic models for now. Another provider needs its own client (like `src/claude.ts`) and prices in `src/pricing.ts`.
+- Model lists and prices change often. Check `src/models.ts` against the providers' pricing pages now and then.
 
 ## Project layout
 
 | Path | What's in it |
 |---|---|
 | `src/questions/` | Question generators and graders, one file per kind |
-| `src/claude.ts` | Requests to the Claude API: batches, live probes, results |
+| `src/models.ts` | Every supported model: provider, thinking levels, prices |
+| `src/providers/` | One client per API: `anthropic.ts` for Claude, `responses.ts` for OpenAI, xAI and Meta |
+| `src/run.ts` | What all providers share: runs, results, grading an answer, cost estimates |
 | `src/analysis.ts` | Baselines, comparisons and verdicts |
 | `src/report.ts` | The plain-text reports |
 | `src/cli.ts` | The `./nerf` commands |

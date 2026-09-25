@@ -1,5 +1,5 @@
 // Turns saved runs into what we publish: per model, a baseline, a recent window and a verdict.
-import type { Effort, Result, RunMeta } from "./claude.ts";
+import type { Result, RunMeta } from "./run.ts";
 import { CATEGORIES, type Category } from "./questions/index.ts";
 import { listRuns, loadResults } from "./store.ts";
 
@@ -39,7 +39,7 @@ export type Track = {
   key: string;
   model: string;
   modelName: string;
-  effort: Effort;
+  effort: string;
   releasedAt?: string;
   baselineStart: string;
   launchGapDays?: number; // days from release to the start of tracking

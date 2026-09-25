@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { costUsd } from "../src/pricing.ts";
+import { costUsd } from "../src/models.ts";
 import { generateQuestionSet, grade, type Question } from "../src/questions/index.ts";
 import { gradeInstructions, type InstructionSpec } from "../src/questions/instructions.ts";
 import { wilson } from "../src/report.ts";

@@ -1,6 +1,6 @@
 // Plain-text reports for a finished run.
 import { baselineSentence, verdictSentence, type Track } from "./analysis.ts";
-import type { Result, RunMeta } from "./claude.ts";
+import type { Result, RunMeta } from "./run.ts";
 import { CATEGORIES, LEVELS } from "./questions/index.ts";
 
 // The schedule the monthly projection assumes: a run every 2nd day, the live probe 4 times on run days.
@@ -59,7 +59,8 @@ function scoreLines(results: Result[]): string[] {
 
 export function batchReport(run: RunMeta, results: Result[], probeIds: Set<string>, track?: Track): string {
   const ok = results.filter((r) => r.status === "ok");
-  const lines = [...header(run, "Batch API", track), ...scoreLines(results), ""];
+  const viaBatch = Boolean(run.batchId);
+  const lines = [...header(run, viaBatch ? "Batch API" : "asked live", track), ...scoreLines(results), ""];
 
   const rows = [["", "passed", ...LEVELS.map((l) => `L${l}`), "output/q", "thinking/q"]];
   for (const category of CATEGORIES) {
@@ -81,7 +82,7 @@ export function batchReport(run: RunMeta, results: Result[], probeIds: Set<strin
   const cacheRead = sum(ok.map((r) => r.usage!.cacheRead));
   const cacheWrite = sum(ok.map((r) => r.usage!.cacheWrite));
   lines.push(
-    `Cost of this run: ${usd(cost)} ($${(cost / Math.max(ok.length, 1)).toFixed(3)} per question, Batch prices)`,
+    `Cost of this run: ${usd(cost)} ($${(cost / Math.max(ok.length, 1)).toFixed(3)} per question, ${viaBatch ? "Batch" : "live"} prices)`,
     priciest ? `Priciest question: ${priciest.questionId}, ${num(priciest.usage!.output)} output tokens, ${usd(priciest.costUsd)}` : "",
     `Cache: ${num(cacheRead)} input tokens read from cache, ${num(cacheWrite)} written`,
     "",
@@ -89,13 +90,14 @@ export function batchReport(run: RunMeta, results: Result[], probeIds: Set<strin
 
   // Scale up if some questions errored, so the projection reflects a full run.
   const fullRunCost = ok.length ? (cost * run.questionIds.length) / ok.length : 0;
-  const probeCost = sum(ok.filter((r) => probeIds.has(r.questionId)).map((r) => r.costUsd)) * 2; // live price = 2x batch
+  // The probe is always live: twice the batch price, the same as a live full run.
+  const probeCost = sum(ok.filter((r) => probeIds.has(r.questionId)).map((r) => r.costUsd)) * (viaBatch ? 2 : 1);
   const monthlyBatch = fullRunCost * RUNS_PER_MONTH;
   const monthlyProbe = probeCost * PROBES_PER_RUN_DAY * RUNS_PER_MONTH;
   lines.push(
     `Projected cost per model per month, with a run every 2nd day (${RUNS_PER_MONTH} runs):`,
     ...table([
-      [`  Batch run: ${run.questionIds.length} questions × ${RUNS_PER_MONTH} runs`, usd(monthlyBatch)],
+      [`  Full run: ${run.questionIds.length} questions × ${RUNS_PER_MONTH} runs`, usd(monthlyBatch)],
       [`  Live probe: 10 questions × ${PROBES_PER_RUN_DAY} a day × ${RUNS_PER_MONTH} run days`, usd(monthlyProbe)],
       ["  Total", `~${usd(monthlyBatch + monthlyProbe)}`],
     ]),

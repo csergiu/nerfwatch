@@ -1,28 +1,30 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { randomInt } from "node:crypto";
 import { parseArgs } from "node:util";
 import { findTrack } from "./analysis.ts";
-import { collectBatch, DEFAULT_SETTINGS, estimateCost, fetchModelInfo, runLive, submitBatch, type Effort, type Settings } from "./claude.ts";
-import { priceFor } from "./pricing.ts";
-import { generateQuestionSet, type QuestionSet } from "./questions/index.ts";
+import { MODELS, modelInfo } from "./models.ts";
+import { PROVIDER_LABELS, providerFor, usesBatchApi } from "./providers/index.ts";
+import { generateQuestionSet, type Question, type QuestionSet } from "./questions/index.ts";
 import { batchReport, probeReport } from "./report.ts";
+import { DEFAULT_SETTINGS, estimateCost, type ProviderClient, type Result, type Settings } from "./run.ts";
 import { createRun, listRuns, loadMeta, loadQuestionSet, loadResults, saveQuestionSet, saveResults } from "./store.ts";
 
-const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
+const LIVE_CONCURRENCY = 4; // full runs without a batch API: questions asked at the same time
 
 const HELP = `Usage: ./nerf <command> [options]
 
 Commands:
   generate          Create the private question set (data/questions.json)
-  submit            Send all questions as one Batch API run (half price, results within 24h)
+  submit            Run all questions: through the provider's batch API (half price) where
+                    there is one, otherwise live
   collect [run]     Fetch the results of every finished batch run (or just one) and print the reports
   probe             Ask the 10 probe questions live, right now (also measures speed)
   report [run]      Print the report for a run (default: the latest)
+  models            List the models you can test, with their thinking levels and prices
 
 Options:
   --yes             Actually send requests. Without it, submit and probe only show the estimated cost.
-  --model <id>      Default: ${DEFAULT_SETTINGS.model}
-  --effort <level>  ${EFFORTS.join(" | ")} (default: ${DEFAULT_SETTINGS.effort})
+  --model <id>      Default: ${DEFAULT_SETTINGS.model}. See ./nerf models
+  --effort <level>  How much the model may think; levels depend on the model (default: ${DEFAULT_SETTINGS.effort})
   --seed <n>        generate only (default: a random secret seed)
   --force           generate only: replace the existing question set
 `;
@@ -43,9 +45,9 @@ const { values, positionals } = parseArgs({
 
 function settingsFromFlags(): Settings {
   const model = values.model ?? DEFAULT_SETTINGS.model;
-  priceFor(model); // fails early for models we can't price
-  const effort = (values.effort ?? DEFAULT_SETTINGS.effort) as Effort;
-  if (!EFFORTS.includes(effort)) throw new Error(`--effort must be one of: ${EFFORTS.join(", ")}`);
+  const { efforts } = modelInfo(model); // fails early for models we don't know
+  const effort = values.effort ?? DEFAULT_SETTINGS.effort;
+  if (!efforts.includes(effort)) throw new Error(`--effort for ${model} must be one of: ${efforts.join(", ")}`);
   return { ...DEFAULT_SETTINGS, model, effort };
 }
 
@@ -72,47 +74,78 @@ async function generate() {
   }
 }
 
+// Asks questions live, a few at a time, showing progress.
+async function askLive(provider: ProviderClient, questions: Question[], set: QuestionSet, settings: Settings) {
+  const results: Result[] = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < questions.length) {
+      const q = questions[next++];
+      results.push(await provider.runLive(q, set, settings));
+      process.stdout.write(`\r${results.length}/${questions.length} answered`);
+    }
+  };
+  await Promise.all(Array.from({ length: LIVE_CONCURRENCY }, worker));
+  process.stdout.write("\n");
+  return results;
+}
+
 async function submit() {
   const set = loadQuestionSet();
   const settings = settingsFromFlags();
-  printEstimate(set.questions.length, estimateCost(set, set.questions, settings, true), settings, "via the Batch API");
+  const batch = usesBatchApi(settings.model);
+  const how = batch ? "via the Batch API" : `live (${PROVIDER_LABELS[modelInfo(settings.model).provider]} runs have no batch discount)`;
+  printEstimate(set.questions.length, estimateCost(set, set.questions, settings, batch), settings, how);
   if (!values.yes) return console.log("\nNothing sent. Run again with --yes to send.");
 
-  const client = new Anthropic();
-  const modelInfo = await fetchModelInfo(client, settings.model);
-  const batchId = await submitBatch(client, set, set.questions, settings);
-  const run = createRun({
-    kind: "batch",
+  const provider = providerFor(settings.model);
+  const base = {
+    kind: "batch" as const,
     createdAt: new Date().toISOString(),
     settings,
     questionSetCreatedAt: set.createdAt,
     questionIds: set.questions.map((q) => q.id),
-    batchId,
-    ...modelInfo,
-  });
-  console.log(`\nSubmitted as run ${run.id} (batch ${batchId}).`);
-  console.log("Most batches finish within an hour, at most 24h. Then run: ./nerf collect");
+    ...(await provider.fetchModelInfo(settings.model)),
+  };
+
+  if (provider.batch) {
+    const batchId = await provider.batch.submit(set, set.questions, settings);
+    const run = createRun({ ...base, batchId });
+    console.log(`\nSubmitted as run ${run.id} (batch ${batchId}).`);
+    return console.log("Most batches finish within an hour, at most 24h. Then run: ./nerf collect");
+  }
+
+  // No batch API: ask everything now. The run is only saved once it's complete.
+  console.log("");
+  const results = await askLive(provider, set.questions, set, settings);
+  const run = createRun(base);
+  saveResults(run.id, results);
+  console.log(`\n${batchReport(run, results, probeIds(set), findTrack(run))}`);
 }
 
 // Without a run id: every batch run still waiting for results, oldest first,
 // so each report's baseline already includes the runs before it.
 async function collect() {
-  const runs = positionals[1] ? [loadMeta(positionals[1])] : listRuns("batch").filter((r) => !loadResults(r.id)).reverse();
+  const runs = positionals[1]
+    ? [loadMeta(positionals[1])]
+    : listRuns("batch")
+        .filter((r) => r.batchId && !loadResults(r.id))
+        .reverse();
   if (!runs.length) return console.log("No batch run is waiting for results.");
 
   const set = loadQuestionSet();
-  const client = new Anthropic();
   let unfinished = 0;
 
   for (const run of runs) {
     if (run.kind !== "batch") throw new Error(`${run.id} is a probe run, not a batch run.`);
+    if (!run.batchId) throw new Error(`${run.id} was asked live, so its results were saved when it ran.`);
     if (set.createdAt !== run.questionSetCreatedAt) {
       console.error(`Skipped ${run.id}: it used a different question set than data/questions.json, so it can't be graded.`);
       process.exitCode = 1;
       continue;
     }
 
-    const outcome = await collectBatch(client, run, set);
+    const outcome = await providerFor(run.settings.model).batch!.collect(run, set);
     if (!outcome.done) {
       const c = outcome.counts;
       console.log(`${run.id} isn't finished: ${c.processing} processing, ${c.succeeded} done, ${c.errored} errored.`);
@@ -135,21 +168,22 @@ async function probe() {
   printEstimate(questions.length, estimateCost(set, questions, settings, false), settings, "live");
   if (!values.yes) return console.log("\nNothing sent. Run again with --yes to send.");
 
-  const client = new Anthropic();
+  const provider = providerFor(settings.model);
   const run = createRun({
     kind: "probe",
     createdAt: new Date().toISOString(),
     settings,
     questionSetCreatedAt: set.createdAt,
     questionIds: questions.map((q) => q.id),
-    ...(await fetchModelInfo(client, settings.model)),
+    ...(await provider.fetchModelInfo(settings.model)),
   });
   console.log("");
 
+  // One at a time, so response times aren't slowed by our own parallel requests.
   const results = [];
   for (const [k, q] of questions.entries()) {
     process.stdout.write(`[${k + 1}/${questions.length}] ${q.id} … `);
-    const r = await runLive(client, q, set, settings);
+    const r = await provider.runLive(q, set, settings);
     results.push(r);
     console.log(r.status === "error" ? `error: ${r.error}` : `${r.passed ? "passed" : "failed"} in ${r.latency!.totalSec.toFixed(1)}s`);
   }
@@ -168,7 +202,23 @@ async function report() {
   );
 }
 
-const commands: Record<string, () => Promise<void>> = { generate, submit, collect, probe, report };
+async function models() {
+  const rows = [["model", "provider", "full runs", "effort levels", "input / output per 1M tokens"]];
+  for (const [id, m] of Object.entries(MODELS)) {
+    rows.push([
+      id,
+      PROVIDER_LABELS[m.provider],
+      usesBatchApi(id) ? "batch API" : "live",
+      m.efforts.join(", "),
+      `${usd(m.price.input)} / ${usd(m.price.output)}`,
+    ]);
+  }
+  const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
+  for (const row of rows) console.log(row.map((cell, c) => cell.padEnd(widths[c])).join("   ").trimEnd());
+  console.log("\nFull runs through a batch API cost half these prices. Each provider needs its API key in .env (see .env.example).");
+}
+
+const commands: Record<string, () => Promise<void>> = { generate, submit, collect, probe, report, models };
 
 const command = commands[positionals[0]];
 if (!command || values.help) {

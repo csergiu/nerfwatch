@@ -4,6 +4,8 @@ Checks whether an AI model has gotten worse ("nerfed") since you started watchin
 
 It tests models from Anthropic, OpenAI, xAI and Meta through their APIs, one model per run. You choose which; see [Choosing a model](#choosing-a-model).
 
+**See the results at [nerfwatch.lol](https://nerfwatch.lol).** This repository is the engine behind it: run it yourself to watch the models you care about, with your own private questions.
+
 ## How it works
 
 **100 questions:** 4 kinds × 5 difficulty levels × 5 questions each. Every question has one correct answer, checked by code rather than by another AI.
@@ -123,7 +125,20 @@ npm run typecheck
 
 TypeScript runs directly on Node, with no build step.
 
-Issues and pull requests are welcome. Please don't include question sets or results in them.
+## Contributing
+
+Pull requests are welcome: new models and providers, new kinds of questions, better graders, bug fixes and clearer docs. For anything big, open an issue first so we can agree on the approach before you spend time on it.
+
+**Rules for pull requests**
+
+- **Never include your private data:** your question set or its seed, run results, or anything else from `data/` or `runs/`. (The tests use seed 1 on purpose, as a public example.) Leaked questions can end up in training data, which makes them useless for everyone. No API keys either, not even expired ones.
+- **Tests run offline.** They can't call a real API, need a key, or cost money. Use recorded or hand-written responses, like `tests/providers.test.ts` does.
+- **`npm test` and `npm run typecheck` pass.** Add tests for what you change. New generators and graders need tests showing the expected answers are right and that wrong answers fail.
+- **Say so if scores could shift.** A change to a grader, a generator, or the default settings can move scores for the same model, which looks like the model changed when it didn't. Call it out in the pull request so it can go in the release notes.
+- **Grading stays with code.** Every question needs one answer that code can check. No grading by another AI: it can drift too, and then we can't tell which model changed.
+- **Link your sources for models.** When you add or update a model in `src/models.ts`, link the provider's official page for its prices and thinking levels in the pull request.
+- **Keep it small.** One change per pull request, no new dependencies unless there's no reasonable alternative, and no build step.
+- **Use semantic commit messages**, like `feat: add grok-4.8` or `fix: count cache writes for GPT-6`.
 
 ## License
 

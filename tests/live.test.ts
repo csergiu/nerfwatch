@@ -33,6 +33,27 @@ describe("live runs", () => {
     expect(p.calls()).toBe(10);
   });
 
+  it("asks the first question for each document before the others that share it", async () => {
+    const withDocs = set.questions.filter((q) => q.documentId);
+    const log: string[] = [];
+    const client: ProviderClient = {
+      fetchModelInfo: async () => ({}),
+      runLive: async (q) => {
+        log.push(`start ${q.id}`);
+        await new Promise((r) => setTimeout(r, 1));
+        log.push(`end ${q.id}`);
+        return ok(q.id);
+      },
+    };
+    const results = await askLive(client, withDocs, set, settings, { concurrency: 4 });
+    expect(results.map((r) => r.questionId)).toEqual(withDocs.map((q) => q.id)); // still in question order
+    for (const doc of new Set(withDocs.map((q) => q.documentId))) {
+      const [first, ...rest] = withDocs.filter((q) => q.documentId === doc);
+      const firstEnd = log.indexOf(`end ${first.id}`);
+      for (const q of rest) expect(log.indexOf(`start ${q.id}`), `${q.id} waits for ${first.id}`).toBeGreaterThan(firstEnd);
+    }
+  });
+
   it("gives up after its retries, and never retries other errors", async () => {
     const stuck = await askLive(provider(1000).client, questions, set, settings, { pauseMs: 0, retries: 2 });
     expect(stuck.every((r) => r.status === "error")).toBe(true);

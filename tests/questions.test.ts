@@ -120,6 +120,13 @@ describe("logic", () => {
         } else if ((m = sentence.match(/^If (\w+) is a knight, then (\w+) is a (knight|knave)\.$/))) {
           const [a, b, knight] = [at(m[1]), at(m[2]), m[3] === "knight"];
           holds = (k) => !k[a] || k[b] === knight;
+        } else if ((m = sentence.match(/^(\w+) would say that (\w+) is a (knight|knave)\.$/))) {
+          // What a knight would say matches the truth; what a knave would say is the opposite.
+          const [a, b, knight] = [at(m[1]), at(m[2]), m[3] === "knight"];
+          holds = (k) => (k[a] ? k[b] === knight : k[b] !== knight);
+        } else if ((m = sentence.match(/^An odd number of (.+) are knights\.$/))) {
+          const group = m[1].split(/, | and /).map(at);
+          holds = (k) => group.filter((p) => k[p]).length % 2 === 1;
         } else if ((m = sentence.match(/^At least (\d+) of (.+) are knights\.$/))) {
           const [n, group] = [Number(m[1]), m[2].split(/, | and /).map(at)];
           holds = (k) => group.filter((p) => k[p]).length >= n;
@@ -133,9 +140,10 @@ describe("logic", () => {
     return { names, checks };
   }
 
-  const fits = (people: number, checks: ReturnType<typeof parse>["checks"]) => {
+  // Every assignment of knights that fits, stopping once `limit` are found (2 is enough to know it isn't unique).
+  const fits = (people: number, checks: ReturnType<typeof parse>["checks"], limit = 2) => {
     const found: string[] = [];
-    for (let mask = 0; mask < 1 << people; mask++) {
+    for (let mask = 0; mask < 1 << people && found.length < limit; mask++) {
       const k = Array.from({ length: people }, (_, p) => ((mask >> p) & 1) === 1);
       if (checks.every((c) => c.holds(k) === k[c.speaker])) found.push(k.map(String).join());
     }

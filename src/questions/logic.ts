@@ -2,7 +2,8 @@
 // work out who is which from what they say. Each puzzle is checked against every possible answer,
 // so exactly one fits, and trimmed so every statement is needed to find it.
 // Difficulty = more people, and from level 4, only statements that tie several of them together
-// (nobody says outright who is a knight), so every answer takes a chain of deductions.
+// (nobody says outright who is a knight), so every answer takes a chain of deductions, including
+// the classic twists: what someone else would say (a knave lies about that too), and odd counts.
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
@@ -13,6 +14,8 @@ type Statement = { speaker: number } & (
   | { kind: "if"; a: number; b: number; knight: boolean } // if a is a knight, then b is a knight (or a knave)
   | { kind: "count"; group: number[]; mask: number; k: number; knights: boolean } // exactly k of the group are knights (or knaves)
   | { kind: "atLeast"; group: number[]; mask: number; k: number } // at least k of the group are knights
+  | { kind: "wouldSay"; a: number; b: number; knight: boolean } // a would say that b is a knight (or a knave)
+  | { kind: "odd"; group: number[]; mask: number } // an odd number of the group are knights
 );
 type Kind = Statement["kind"];
 
@@ -21,8 +24,8 @@ const LEVELS: Level[] = [
   { people: 4, kinds: ["is", "same"] },
   { people: 5, kinds: ["is", "same", "or"] },
   { people: 9, kinds: ["is", "same", "or", "if", "count"] },
-  { people: 12, kinds: ["same", "or", "if", "count", "atLeast"] },
-  { people: 16, kinds: ["same", "or", "if", "count", "atLeast"] },
+  { people: 12, kinds: ["same", "or", "if", "count", "atLeast", "wouldSay"] },
+  { people: 16, kinds: ["same", "if", "count", "atLeast", "wouldSay", "odd"] },
 ];
 
 const NAMES = [
@@ -57,6 +60,11 @@ function holds(s: Statement, knights: Knights): boolean {
     }
     case "atLeast":
       return countBits(knights & s.mask) >= s.k;
+    case "wouldSay":
+      // A knight would say b is a knight exactly when b is one; a knave exactly when b isn't.
+      return (isKnight(knights, s.a) === isKnight(knights, s.b)) === s.knight;
+    case "odd":
+      return countBits(knights & s.mask) % 2 === 1;
   }
 }
 
@@ -90,6 +98,12 @@ function randomStatement(rng: Rng, kinds: Kind[], speaker: number, people: numbe
       const group = rng.shuffle(others).slice(0, rng.int(4, 5)).sort((x, y) => x - y);
       return { speaker, kind, group, mask: maskOf(group), k: rng.int(2, group.length - 1) };
     }
+    case "wouldSay":
+      return { speaker, kind, a, b, knight: rng.int(0, 1) === 1 };
+    case "odd": {
+      const group = rng.shuffle(others).slice(0, rng.int(3, 4)).sort((x, y) => x - y);
+      return { speaker, kind, group, mask: maskOf(group) };
+    }
   }
 }
 
@@ -112,6 +126,10 @@ function render(s: Statement, names: string[]): string {
     }
     case "atLeast":
       return `At least ${s.k} of ${list(s.group.map((p) => names[p]))} are knights.`;
+    case "wouldSay":
+      return `${names[s.a]} would say that ${names[s.b]} is ${kind(s.knight)}.`;
+    case "odd":
+      return `An odd number of ${list(s.group.map((p) => names[p]))} are knights.`;
   }
 }
 
@@ -153,6 +171,9 @@ export function generateLogic(rng: Rng, level: number): { prompt: string; expect
   });
   const prompt = [
     "On an island, everyone is either a knight or a knave. Every sentence a knight says is true, and every sentence a knave says is false.",
+    ...(statements.some((s) => s.kind === "wouldSay")
+      ? ["“X would say that Y is a knight” means X would answer yes if asked whether Y is a knight."]
+      : []),
     `You meet ${people} people: ${list(names)}.`,
     "",
     ...lines,

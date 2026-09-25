@@ -50,9 +50,13 @@ describe("OpenRouter requests", () => {
     expect(buildBody(codeQ, set, settings("openrouter/x/y", "none"))).not.toHaveProperty("reasoning");
   });
 
-  it("puts the long document first", () => {
+  it("puts the long document first, marked for the prompt cache", () => {
     const body = buildBody(docQ, set, settings("openrouter/x/y"));
-    expect(body.messages[0].content[0].text).toBe(set.documents[docQ.documentId!]);
+    expect(body.messages[0].content[0]).toEqual({ type: "text", text: set.documents[docQ.documentId!], cache_control: { type: "ephemeral" } });
+    expect(body.messages[0].content[1]).toEqual({ type: "text", text: docQ.prompt }); // the question itself differs, so it isn't cached
+    expect(buildBody(codeQ, set, settings("openrouter/x/y")).messages[0].content).toEqual([{ type: "text", text: codeQ.prompt }]);
+    const batched = buildBatch(set, [docQ], settings("openrouter/x/y@p")).requests[0].body;
+    expect(batched.messages[0].content[0].cache_control).toEqual({ type: "ephemeral" });
   });
 });
 

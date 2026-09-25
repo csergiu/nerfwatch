@@ -13,7 +13,7 @@ It tests models from Anthropic, OpenAI, xAI and Meta through their own APIs, and
 | Kind | Task | Harder levels mean |
 |---|---|---|
 | reasoning | Track a list through a series of operations | 12 → 120 operations on lists of up to 24 numbers; from level 2, operations that depend on the values ("remove the largest", "if the sum is even…"); from level 3, operations on a stretch of positions ("reverse positions 4 to 11") |
-| logic | Work out who always tells the truth and who always lies, from what they say (knights and knaves) | 4 → 16 people; statements that tie more of them together ("exactly 2 of…", "if… then…", "at least 3 of…"), and from level 4, nobody says outright who is a knight |
+| logic | Work out who always tells the truth and who always lies, from what they say (knights and knaves) | 4 → 16 people; statements that tie more of them together ("exactly 2 of…", "if… then…", "at least 3 of…"), and from level 4, nobody says outright who is a knight, plus the classic twists: what someone else would say, and "an odd number of…" |
 | code | Predict what a small Python program prints | more variables, statements and loops; from level 3, bigger numbers and multiplication; from level 4, a list read and written at positions that depend on the variables |
 | instructions | Write lines that follow checkable rules (acrostic, word counts, banned letter…) | 2 → 10 rules at once; from level 3, rules that need counting or planning every word (letters per line, alliteration, no repeated words, last letters that spell a word) |
 | long-context | Answer questions about a staff directory | ~3k → ~33k token document; levels 1–2 follow a chain of managers, levels 3–5 count across every record, looking up each person's manager ("how many people in Design have a manager in Security?") and at levels 4–5, that manager's manager |
@@ -80,7 +80,7 @@ Use the same `--model` and `--effort` for `submit` and `probe`, so the live prob
 
 ## Cost
 
-`submit` and `probe` show an estimate and send nothing unless you add `--yes`. For example, on Claude Opus 5 the estimate is about $3 for a batch run of 100 questions and $0.40 for a live probe. How much the model thinks is the biggest factor, so check the first report for the real number. Each report gives the real cost and projects a monthly cost per model for a run every day.
+`submit` and `probe` show an estimate and send nothing unless you add `--yes`. For example, on Claude Opus 5 the estimate is about $3 for a batch run of 100 questions and $0.40 for a live probe. The long documents are marked for the provider's prompt cache, and live runs ask the first question for each document before the rest, so the other questions read it at a fraction of the price. How much the model thinks is the biggest factor, so check the first report for the real number. Each report gives the real cost and projects a monthly cost per model for a run every day.
 
 Prices live in `src/models.ts` (list prices, September 2026), with links to each provider's pricing page. Update them when they change.
 

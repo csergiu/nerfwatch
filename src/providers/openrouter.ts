@@ -23,8 +23,10 @@ export function parseModel(model: string): { slug: string; pin?: string } {
 
 // The question itself, shared by live and batch requests.
 function messageBody(q: Question, set: QuestionSet, settings: Settings) {
-  const content: { type: "text"; text: string }[] = [];
-  if (q.documentId) content.push({ type: "text", text: set.documents[q.documentId] });
+  const content: { type: "text"; text: string; cache_control?: { type: "ephemeral" } }[] = [];
+  // Every question at a level shares its document, so it's marked for the provider's prompt cache:
+  // Anthropic (and Google) need the mark; OpenAI, xAI and Meta cache a repeated prompt start on their own.
+  if (q.documentId) content.push({ type: "text", text: set.documents[q.documentId], cache_control: { type: "ephemeral" } });
   content.push({ type: "text", text: q.prompt });
   return {
     messages: [{ role: "user", content }],

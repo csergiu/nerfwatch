@@ -4,7 +4,9 @@ Checks whether an AI model has gotten worse ("nerfed") since you started watchin
 
 It tests models from Anthropic, OpenAI, xAI and Meta through their own APIs, and any model on OpenRouter, one model per run. Each model gets a full test every day. You choose which; see [Choosing a model](#choosing-a-model).
 
-**See the results at [nerfwatch.lol](https://nerfwatch.lol).** This repository is the engine behind it: run it yourself to watch the models you care about, with your own questions.
+**See the results at [nerfwatch.lol](https://nerfwatch.lol), and have your say.** Every model there gets a test score and a community vote, side by side. If a model has felt off lately, tap "Nerfed"; if it's as good as ever, tap "Feels fine". Then see whether the tests agree with you. You get one vote per model per day, and you can change it any time that day.
+
+This repository is the engine behind the test scores: run it yourself to watch the models you care about, with your own questions.
 
 ## How it works
 

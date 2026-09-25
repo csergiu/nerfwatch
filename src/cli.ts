@@ -15,7 +15,7 @@ const HELP = `Usage: ./nerf <command> [options]
 Commands:
   generate          Create the private question set (data/questions.json)
   submit            Send all questions as one Batch API run (half price, results within 24h)
-  collect [run]     Fetch a finished batch run's results and print its report
+  collect [run]     Fetch the results of every finished batch run (or just one) and print the reports
   probe             Ask the 10 probe questions live, right now (also measures speed)
   report [run]      Print the report for a run (default: the latest)
 
@@ -94,24 +94,38 @@ async function submit() {
   console.log("Most batches finish within an hour, at most 24h. Then run: ./nerf collect");
 }
 
+// Without a run id: every batch run still waiting for results, oldest first,
+// so each report's baseline already includes the runs before it.
 async function collect() {
-  const run = positionals[1] ? loadMeta(positionals[1]) : listRuns("batch").find((r) => !loadResults(r.id));
-  if (!run) return console.log("No batch run is waiting for results.");
-  if (run.kind !== "batch") throw new Error(`${run.id} is a probe run, not a batch run.`);
+  const runs = positionals[1] ? [loadMeta(positionals[1])] : listRuns("batch").filter((r) => !loadResults(r.id)).reverse();
+  if (!runs.length) return console.log("No batch run is waiting for results.");
 
   const set = loadQuestionSet();
-  if (set.createdAt !== run.questionSetCreatedAt) {
-    throw new Error(`${run.id} used a different question set than data/questions.json, so it can't be graded.`);
+  const client = new Anthropic();
+  let unfinished = 0;
+
+  for (const run of runs) {
+    if (run.kind !== "batch") throw new Error(`${run.id} is a probe run, not a batch run.`);
+    if (set.createdAt !== run.questionSetCreatedAt) {
+      console.error(`Skipped ${run.id}: it used a different question set than data/questions.json, so it can't be graded.`);
+      process.exitCode = 1;
+      continue;
+    }
+
+    const outcome = await collectBatch(client, run, set);
+    if (!outcome.done) {
+      const c = outcome.counts;
+      console.log(`${run.id} isn't finished: ${c.processing} processing, ${c.succeeded} done, ${c.errored} errored.`);
+      unfinished++;
+      continue;
+    }
+    saveResults(run.id, outcome.results);
+    console.log(`${batchReport(run, outcome.results, probeIds(set), findTrack(run))}\n`);
   }
 
-  const outcome = await collectBatch(new Anthropic(), run, set);
-  if (!outcome.done) {
-    const c = outcome.counts;
-    console.log(`Run ${run.id} isn't finished: ${c.processing} processing, ${c.succeeded} done, ${c.errored} errored.`);
-    return console.log("Try again later.");
+  if (unfinished) {
+    console.log(`${unfinished === 1 ? "1 run isn't" : `${unfinished} runs aren't`} finished yet. Run ./nerf collect again later.`);
   }
-  saveResults(run.id, outcome.results);
-  console.log(batchReport(run, outcome.results, probeIds(set), findTrack(run)));
 }
 
 async function probe() {

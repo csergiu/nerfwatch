@@ -2,7 +2,7 @@
 
 Checks whether an AI model has gotten worse ("nerfed") since you started watching it. It asks the model the same private, automatically graded questions on a schedule and compares each result with a fixed baseline.
 
-It currently works with Anthropic's Claude models, through the API.
+It tests Anthropic's Claude models through the API, one model per run. You choose which one; see [Choosing a model](#choosing-a-model).
 
 ## How it works
 
@@ -32,17 +32,37 @@ npm install
 cp .env.example .env    # then add your Anthropic API key
 ./nerf generate         # creates your private question set in data/
 ./nerf submit           # dry run: shows the estimated cost, sends nothing
-./nerf submit --yes     # sends the 100 questions through the Batch API (half price)
-./nerf collect          # once the batch is done (usually within an hour): grades it and prints a report
+./nerf submit --yes     # sends the 100 questions to Claude Opus 5 through the Batch API (half price)
+./nerf collect          # once batches are done (usually within an hour): grades them and prints the reports
 ./nerf probe --yes      # asks 10 of the questions live and measures response time
 ./nerf report           # prints the latest report again
 ```
 
 Every request and answer is saved in `runs/<run id>/`, so you can check the grading yourself.
 
+## Choosing a model
+
+Each run tests one model. Pick it with `--model`, and how much it's allowed to think with `--effort`:
+
+```bash
+./nerf submit --yes --model claude-sonnet-5 --effort medium
+./nerf probe --yes --model claude-sonnet-5 --effort medium
+```
+
+Use the same `--model` and `--effort` for `submit` and `probe`, so the live probe matches the batch runs it sits next to.
+
+| Option | Values | Default |
+|---|---|---|
+| `--model` | `claude-opus-5`, `claude-opus-5-5`, `claude-sonnet-5`, `claude-fable-5-1` | `claude-opus-5` |
+| `--effort` | `low`, `medium`, `high`, `xhigh`, `max` | `high` |
+
+These are the models with prices in `src/pricing.ts`. Any other name stops before anything is sent. To add a model, add its price there. It also has to accept adaptive thinking and an effort level: older models such as Claude Haiku 4.5 don't, and would need changes to `src/claude.ts`.
+
+**Testing several models:** run `submit` and `probe` once per model. Each model and effort level gets its own baseline and verdict, since scores are only compared with the same model's earlier runs. Costs add up per model. One `./nerf collect` fetches every finished batch, whichever model it's for, and lists the ones still processing.
+
 ## Cost
 
-`submit` and `probe` show an estimate and send nothing unless you add `--yes`. On Claude Opus 5 the estimate is about $3 for a batch run of 100 questions and $0.40 for a live probe. How much the model thinks is the biggest factor, so check the first report for the real number. Each report gives the real cost and projects a monthly cost for a run every 2nd day.
+`submit` and `probe` show an estimate and send nothing unless you add `--yes`. On Claude Opus 5 the estimate is about $3 for a batch run of 100 questions and $0.40 for a live probe. How much the model thinks is the biggest factor, so check the first report for the real number. Each report gives the real cost and projects a monthly cost per model for a run every 2nd day.
 
 Prices live in `src/pricing.ts` (list prices, mid-2026). Update them when they change.
 
@@ -65,6 +85,8 @@ For example, a run every 2nd day with cron:
 0 12 */2 * *         cd /path/to/nerf-watch && ./nerf collect
 0 0,6,12,18 */2 * *  cd /path/to/nerf-watch && ./nerf probe --yes
 ```
+
+This tests the default model. For another model, add `--model <id>` to the `submit` and `probe` lines, and give each model its own lines. The single `collect` line covers all of them; a batch that isn't done yet is picked up on the next run.
 
 ## Limitations
 

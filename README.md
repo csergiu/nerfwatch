@@ -12,11 +12,11 @@ It tests models from Anthropic, OpenAI, xAI and Meta through their own APIs, and
 
 | Kind | Task | Harder levels mean |
 |---|---|---|
-| reasoning | Track a list through a series of operations | 12 → 90 operations; from level 2, operations that depend on the values ("remove the largest", "if the sum is even…") |
-| logic | Work out who always tells the truth and who always lies, from what they say (knights and knaves) | 4 → 11 people; statements that tie more of them together ("exactly 2 of…", "if… then…") |
-| code | Predict what a small Python program prints | more variables, statements and loops; from level 3, bigger numbers and multiplication |
-| instructions | Write lines that follow checkable rules (acrostic, word counts, banned letter…) | 2 → 6 rules at once; from level 3, rules that need counting or planning every word (letters per line, alliteration, no repeated words) |
-| long-context | Follow a chain of managers through a staff directory | ~3k → ~33k token document, longer chains, and from level 3, finding everyone who reports to someone |
+| reasoning | Track a list through a series of operations | 12 → 120 operations on lists of up to 24 numbers; from level 2, operations that depend on the values ("remove the largest", "if the sum is even…"); from level 3, operations on a stretch of positions ("reverse positions 4 to 11") |
+| logic | Work out who always tells the truth and who always lies, from what they say (knights and knaves) | 4 → 16 people; statements that tie more of them together ("exactly 2 of…", "if… then…", "at least 3 of…"), and from level 4, nobody says outright who is a knight |
+| code | Predict what a small Python program prints | more variables, statements and loops; from level 3, bigger numbers and multiplication; from level 4, a list read and written at positions that depend on the variables |
+| instructions | Write lines that follow checkable rules (acrostic, word counts, banned letter…) | 2 → 10 rules at once; from level 3, rules that need counting or planning every word (letters per line, alliteration, no repeated words, last letters that spell a word) |
+| long-context | Answer questions about a staff directory | ~3k → ~33k token document; levels 1–2 follow a chain of managers, levels 3–5 count across every record, looking up each person's manager ("how many people in Design have a manager in Security?") and at levels 4–5, that manager's manager |
 
 **The baseline** is every finished run in the first 7 days of tracking, for the same model, effort and question set. Change any of those and a new baseline starts. For a model released before you started tracking it, reports say so and show the baseline date: you can't test the past, so scores are compared with that date, not launch day.
 
@@ -69,7 +69,7 @@ Use the same `--model` and `--effort` for `submit` and `probe`, so the live prob
 **OpenRouter:** use the model's OpenRouter id with `openrouter/` in front, for example `--model openrouter/google/gemini-3.1-pro`. Its name, release date and prices come from OpenRouter's model list, and each answer's cost is what OpenRouter reports it charged. Thinking levels are OpenRouter's: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; use `none` for models that don't think.
 
 - **Pin the provider.** OpenRouter can serve a model from different companies and switch between them, and a different provider can score differently, which would look like a nerf. Add `@<provider>` to pin one, for example `openrouter/google/gemini-3.1-pro@google-vertex`, and fallbacks are turned off. Pinned and unpinned runs get separate baselines. When OpenRouter says which provider served an answer, that's saved with it too.
-- **Batch API.** When OpenRouter offers a model's `:batch` variant, and your pinned provider serves it, full runs go through OpenRouter's Batch API at half price and come back through `./nerf collect`.
+- **Batch API.** When OpenRouter offers a model's `:batch` variant, and your pinned provider serves it, full runs go through OpenRouter's Batch API at half price and come back through `./nerf collect`. OpenRouter lists a `:batch` variant for some models that its Batch API then refuses (Claude Sonnet 5 and Haiku 4.5, in September 2026); `submit` then asks them live, at full price, and says so.
 - **Privacy.** Live requests ask OpenRouter to skip providers that may keep or train on your prompts (`data_collection: deny`), and providers that would ignore the thinking level. Batches can't carry that setting (a pinned provider is the only routing option they accept), so OpenRouter applies your account's data policy instead: set it in OpenRouter's privacy settings.
 
 **Meta:** only the Standard tier is supported. Meta's cheaper `-contributor` models may be trained on what you send them, including your questions.

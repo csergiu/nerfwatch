@@ -1,6 +1,7 @@
 // Instruction following: write a few lines that obey checkable rules.
 // Difficulty = more rules on top of "exactly N lines", and from level 3 on, rules that need
-// counting or planning every word (letters per line, alliteration, no repeated words, growing words).
+// counting or planning every word (letters per line, alliteration, no repeated words, growing words,
+// last letters that spell a word).
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
@@ -14,18 +15,19 @@ export type Rule =
   | { kind: "lettersPerLine"; count: number }
   | { kind: "alliteration" }
   | { kind: "noRepeat"; except?: string }
-  | { kind: "increasing" };
+  | { kind: "increasing" }
+  | { kind: "telestich"; word: string };
 
 export type InstructionSpec = { lines: number; rules: Rule[] };
 
 const BASIC: Rule["kind"][] = ["acrostic", "wordsPerLine", "avoidLetter", "includeWord", "endWith", "lowercase"];
-const HARD: Rule["kind"][] = ["lettersPerLine", "alliteration", "noRepeat", "increasing"];
+const HARD: Rule["kind"][] = ["lettersPerLine", "alliteration", "noRepeat", "increasing", "telestich"];
 const LEVELS = [
   { basic: 2, hard: 0 },
   { basic: 3, hard: 0 },
   { basic: 3, hard: 1 },
-  { basic: 4, hard: 2 },
-  { basic: 4, hard: 3 },
+  { basic: 4, hard: 4 },
+  { basic: 5, hard: 5 },
 ];
 
 const TOPICS = [
@@ -62,10 +64,27 @@ export function generateInstructions(rng: Rng, level: number): { prompt: string;
   // so an acrostic must include that letter.
   const fits = (include: string, acrostic?: string) =>
     allowed(include) && !(acrostic && chosen.has("alliteration") && !acrostic.includes(include[0].toUpperCase()));
+  // Last letters that spell a word need one as long as the first letters' word, if there is one.
+  const partners = (acrostic?: string) =>
+    ACROSTIC_WORDS.filter((w) => allowed(w) && (!acrostic || (w.length === acrostic.length && w !== acrostic)));
   const acrostic = chosen.has("acrostic")
-    ? rng.pick(ACROSTIC_WORDS.filter((w) => allowed(w) && (!chosen.has("includeWord") || INCLUDE_WORDS.some((i) => fits(i, w)))))
+    ? rng.pick(
+        ACROSTIC_WORDS.filter(
+          (w) =>
+            allowed(w) &&
+            (!chosen.has("includeWord") || INCLUDE_WORDS.some((i) => fits(i, w))) &&
+            (!chosen.has("telestich") || partners(w).length > 0),
+        ),
+      )
     : undefined;
   const include = chosen.has("includeWord") ? rng.pick(INCLUDE_WORDS.filter((i) => fits(i, acrostic))) : undefined;
+  // With alliteration and growing words too, the required word fits at most once per line, and only on
+  // lines starting with its letter, so the first letters' word limits how often it can be asked for.
+  const maxTimes =
+    include && acrostic && chosen.has("alliteration") && chosen.has("increasing")
+      ? [...acrostic.toLowerCase()].filter((c) => c === include[0]).length
+      : 3;
+  const telestich = chosen.has("telestich") ? rng.pick(partners(acrostic)) : undefined;
 
   let lines = rng.int(4, 7);
   let wordsPerLine: number | undefined;
@@ -92,9 +111,9 @@ export function generateInstructions(rng: Rng, level: number): { prompt: string;
         text.push(`Do not use the letter "${letter}" anywhere, in upper or lower case.`);
         break;
       case "includeWord": {
-        const times = rng.int(2, 3);
+        const times = rng.int(Math.min(2, maxTimes), maxTimes);
         rules.push({ kind, word: include!, times });
-        text.push(`Use the word "${include}" exactly ${times} times in total.`);
+        text.push(`Use the word "${include}" exactly ${times === 1 ? "once" : `${times} times`} in total.`);
         break;
       }
       case "endWith": {
@@ -132,6 +151,11 @@ export function generateInstructions(rng: Rng, level: number): { prompt: string;
         rules.push({ kind });
         text.push("In each line, every word must have more letters than the word before it.");
         break;
+      case "telestich":
+        lines = telestich!.length;
+        rules.push({ kind, word: telestich! });
+        text.push(`The last letters of the lines (ignoring punctuation) must spell "${telestich}", in order.`);
+        break;
     }
   }
 
@@ -162,6 +186,11 @@ export function gradeInstructions(text: string, spec: InstructionSpec): Grade {
       case "acrostic": {
         const firsts = lines.map((l) => l.match(/[a-z]/i)?.[0].toLowerCase() ?? "").join("");
         if (firsts !== rule.word.toLowerCase()) failures.push(`first letters "${firsts}"`);
+        break;
+      }
+      case "telestich": {
+        const lasts = lines.map((l) => l.match(/([a-z])[^a-z]*$/i)?.[1].toLowerCase() ?? "").join("");
+        if (lasts !== rule.word.toLowerCase()) failures.push(`last letters "${lasts}"`);
         break;
       }
       case "wordsPerLine": {

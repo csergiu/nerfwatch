@@ -1,23 +1,24 @@
 // Reasoning: track a list through a long sequence of operations.
-// Difficulty = more operations on a longer list, and from level 2 on, operations that depend on the
+// Difficulty = more operations on a longer list; from level 2 on, operations that depend on the
 // list's values (its largest element, its sum, whether it contains a number), so every earlier mistake
-// carries forward.
+// carries forward; from level 3, operations on a stretch of positions, which means counting carefully.
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
 const BASIC = ["append", "prepend", "removeFirst", "removeLast", "reverse", "rotate", "swap", "add"] as const;
 const BY_VALUE = ["removeMax", "minToFront", "subtract", "appendCount", "addAtEven"] as const;
 const CONDITIONAL = ["ifEvenSum", "ifFirstGreater", "ifContains"] as const;
-type Kind = (typeof BASIC)[number] | (typeof BY_VALUE)[number] | (typeof CONDITIONAL)[number];
+const RANGE = ["reverseRange", "rotateRight"] as const;
+type Kind = (typeof BASIC)[number] | (typeof BY_VALUE)[number] | (typeof CONDITIONAL)[number] | (typeof RANGE)[number];
 
 type Level = { steps: number; kinds: readonly Kind[]; start: number; max: number }; // list length at the start, and at most
-const ALL = [...BASIC, ...BY_VALUE, ...CONDITIONAL];
+const ALL = [...BASIC, ...BY_VALUE, ...CONDITIONAL, ...RANGE];
 const LEVELS: Level[] = [
   { steps: 12, kinds: BASIC, start: 6, max: 10 },
   { steps: 25, kinds: [...BASIC, ...BY_VALUE], start: 6, max: 10 },
-  { steps: 40, kinds: ALL, start: 8, max: 12 },
-  { steps: 60, kinds: ALL, start: 10, max: 14 },
-  { steps: 80, kinds: ALL, start: 12, max: 16 },
+  { steps: 45, kinds: ALL, start: 8, max: 12 },
+  { steps: 80, kinds: ALL, start: 14, max: 18 },
+  { steps: 120, kinds: ALL, start: 16, max: 24 },
 ];
 const MIN_LENGTH = 3;
 
@@ -108,6 +109,21 @@ export function generateReasoning(rng: Rng, level: number): { prompt: string; ex
         const n = rng.int(1, 9);
         for (let k = 1; k < list.length; k += 2) list[k] += n;
         ops.push(`Add ${n} to every element at an even position (2, 4, 6 and so on).`);
+        break;
+      }
+      case "reverseRange": {
+        if (list.length < 4) continue;
+        const i = rng.int(1, list.length - 2);
+        const j = rng.int(i + 2, list.length);
+        list.splice(i - 1, j - i + 1, ...list.slice(i - 1, j).reverse());
+        ops.push(`Reverse the order of the elements from position ${i} to position ${j}.`);
+        break;
+      }
+      case "rotateRight": {
+        const k = rng.int(2, 3);
+        if (list.length <= k + 1) continue;
+        list.unshift(...list.splice(list.length - k, k));
+        ops.push(`Move the last ${k} elements to the start, keeping their order.`);
         break;
       }
       case "ifEvenSum":

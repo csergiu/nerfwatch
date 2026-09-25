@@ -1,7 +1,8 @@
 // Logic: knights-and-knaves puzzles. Knights only say true things, knaves only false ones;
 // work out who is which from what they say. Each puzzle is checked against every possible answer,
 // so exactly one fits, and trimmed so every statement is needed to find it.
-// Difficulty = more people, and statements that tie more of them together.
+// Difficulty = more people, and from level 4, only statements that tie several of them together
+// (nobody says outright who is a knight), so every answer takes a chain of deductions.
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
@@ -10,8 +11,8 @@ type Statement = { speaker: number } & (
   | { kind: "same"; a: number; b: number; same: boolean }
   | { kind: "or"; a: number; b: number } // at least one of them is a knight
   | { kind: "if"; a: number; b: number; knight: boolean } // if a is a knight, then b is a knight (or a knave)
-  | { kind: "count"; group: number[]; k: number; knights: boolean } // exactly k of the group are knights (or knaves)
-  | { kind: "countAll"; k: number } // exactly k of everyone are knights
+  | { kind: "count"; group: number[]; mask: number; k: number; knights: boolean } // exactly k of the group are knights (or knaves)
+  | { kind: "atLeast"; group: number[]; mask: number; k: number } // at least k of the group are knights
 );
 type Kind = Statement["kind"];
 
@@ -19,9 +20,9 @@ type Level = { people: number; kinds: Kind[] };
 const LEVELS: Level[] = [
   { people: 4, kinds: ["is", "same"] },
   { people: 5, kinds: ["is", "same", "or"] },
-  { people: 7, kinds: ["is", "same", "or", "if", "count"] },
-  { people: 9, kinds: ["same", "or", "if", "count", "countAll"] },
-  { people: 11, kinds: ["same", "or", "if", "count", "countAll"] },
+  { people: 9, kinds: ["is", "same", "or", "if", "count"] },
+  { people: 12, kinds: ["same", "or", "if", "count", "atLeast"] },
+  { people: 16, kinds: ["same", "or", "if", "count", "atLeast"] },
 ];
 
 const NAMES = [
@@ -29,29 +30,41 @@ const NAMES = [
   "Kit", "Lior", "Mae", "Nils", "Otto", "Pia", "Rhea", "Sol", "Tess", "Uma",
 ];
 
-function holds(s: Statement, knight: boolean[]): boolean {
+// Who is a knight, as bits: bit p is set when person p is a knight. Checking every possible answer
+// means trying up to 2^16 of these, so they stay plain numbers.
+type Knights = number;
+const isKnight = (knights: Knights, p: number) => ((knights >> p) & 1) === 1;
+const countBits = (n: number) => {
+  let c = 0;
+  for (; n; n &= n - 1) c++;
+  return c;
+};
+const maskOf = (group: number[]) => group.reduce((m, p) => m | (1 << p), 0);
+
+function holds(s: Statement, knights: Knights): boolean {
   switch (s.kind) {
     case "is":
-      return knight[s.who] === s.knight;
+      return isKnight(knights, s.who) === s.knight;
     case "same":
-      return (knight[s.a] === knight[s.b]) === s.same;
+      return (isKnight(knights, s.a) === isKnight(knights, s.b)) === s.same;
     case "or":
-      return knight[s.a] || knight[s.b];
+      return isKnight(knights, s.a) || isKnight(knights, s.b);
     case "if":
-      return !knight[s.a] || knight[s.b] === s.knight;
-    case "count":
-      return s.group.filter((p) => knight[p] === s.knights).length === s.k;
-    case "countAll":
-      return knight.filter(Boolean).length === s.k;
+      return !isKnight(knights, s.a) || isKnight(knights, s.b) === s.knight;
+    case "count": {
+      const inGroup = countBits(knights & s.mask);
+      return (s.knights ? inGroup : s.group.length - inGroup) === s.k;
+    }
+    case "atLeast":
+      return countBits(knights & s.mask) >= s.k;
   }
 }
 
 // Every assignment of knights and knaves that fits the statements, stopping at `limit`.
-function solutions(people: number, statements: Statement[], limit = 2): boolean[][] {
-  const found: boolean[][] = [];
-  for (let mask = 0; mask < 1 << people && found.length < limit; mask++) {
-    const knight = Array.from({ length: people }, (_, p) => ((mask >> p) & 1) === 1);
-    if (statements.every((s) => holds(s, knight) === knight[s.speaker])) found.push(knight);
+function solutions(people: number, statements: Statement[], limit = 2): Knights[] {
+  const found: Knights[] = [];
+  for (let knights = 0; knights < 1 << people && found.length < limit; knights++) {
+    if (statements.every((s) => holds(s, knights) === isKnight(knights, s.speaker))) found.push(knights);
   }
   return found;
 }
@@ -71,16 +84,18 @@ function randomStatement(rng: Rng, kinds: Kind[], speaker: number, people: numbe
       return { speaker, kind, a, b, knight: rng.int(0, 1) === 1 };
     case "count": {
       const group = rng.shuffle(others).slice(0, rng.int(3, 4)).sort((x, y) => x - y);
-      return { speaker, kind, group, k: rng.int(1, group.length - 1), knights: rng.int(0, 1) === 1 };
+      return { speaker, kind, group, mask: maskOf(group), k: rng.int(1, group.length - 1), knights: rng.int(0, 1) === 1 };
     }
-    case "countAll":
-      return { speaker, kind, k: rng.int(1, people - 1) };
+    case "atLeast": {
+      const group = rng.shuffle(others).slice(0, rng.int(4, 5)).sort((x, y) => x - y);
+      return { speaker, kind, group, mask: maskOf(group), k: rng.int(2, group.length - 1) };
+    }
   }
 }
 
 const list = (names: string[]) => `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
-function render(s: Statement, names: string[], people: number): string {
+function render(s: Statement, names: string[]): string {
   const kind = (knight: boolean) => (knight ? "a knight" : "a knave");
   switch (s.kind) {
     case "is":
@@ -95,30 +110,31 @@ function render(s: Statement, names: string[], people: number): string {
       const what = s.knights ? (s.k === 1 ? "is a knight" : "are knights") : s.k === 1 ? "is a knave" : "are knaves";
       return `Exactly ${s.k} of ${list(s.group.map((p) => names[p]))} ${what}.`;
     }
-    case "countAll":
-      return `Exactly ${s.k} of the ${people} of us ${s.k === 1 ? "is a knight" : "are knights"}.`;
+    case "atLeast":
+      return `At least ${s.k} of ${list(s.group.map((p) => names[p]))} are knights.`;
   }
 }
 
 export function generateLogic(rng: Rng, level: number): { prompt: string; expected: string[] } {
   const { people, kinds } = LEVELS[level - 1];
   const names = rng.shuffle(NAMES).slice(0, people);
-  let knight: boolean[] = [];
+  const everyone = (1 << people) - 1;
+  let knights: Knights = 0;
   let statements: Statement[] = [];
 
   // A statement the speaker would really make: true for a knight, false for a knave.
   const truthful = (speaker: number) => {
     let s: Statement;
     do s = randomStatement(rng, kinds, speaker, people);
-    while (holds(s, knight) !== knight[speaker]);
+    while (holds(s, knights) !== isKnight(knights, speaker));
     return s;
   };
 
   // Everyone speaks once; then more statements until only one answer fits.
   // Starts over in the rare case the statements keep missing the difference between two answers.
   while (!statements.length || solutions(people, statements).length > 1) {
-    do knight = names.map(() => rng.int(0, 1) === 1);
-    while (knight.every(Boolean) || !knight.some(Boolean));
+    do knights = names.reduce((m, _, p) => (rng.int(0, 1) === 1 ? m | (1 << p) : m), 0);
+    while (knights === 0 || knights === everyone);
     statements = names.map((_, p) => truthful(p));
     while (statements.length < people * 4 && solutions(people, statements).length > 1) {
       statements.push(truthful(rng.int(0, people - 1)));
@@ -132,7 +148,7 @@ export function generateLogic(rng: Rng, level: number): { prompt: string; expect
   }
 
   const lines = names.flatMap((name, p) => {
-    const said = statements.filter((s) => s.speaker === p).map((s) => render(s, names, people));
+    const said = statements.filter((s) => s.speaker === p).map((s) => render(s, names));
     return said.length ? [`${name} says: "${said.join(" ")}"`] : [];
   });
   const prompt = [
@@ -144,7 +160,7 @@ export function generateLogic(rng: Rng, level: number): { prompt: string; expect
     "Who are the knights? Write their names on the last line, separated by commas.",
   ].join("\n");
 
-  return { prompt, expected: names.filter((_, p) => knight[p]).sort() };
+  return { prompt, expected: names.filter((_, p) => isKnight(knights, p)).sort() };
 }
 
 // The names on the last line, compared as a set.

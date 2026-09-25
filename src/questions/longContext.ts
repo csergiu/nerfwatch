@@ -1,21 +1,21 @@
 // Long context: questions about a large staff directory.
 // Difficulty = a bigger directory (roughly 3k to 33k tokens) and questions that need more of it:
-// following a chain of managers (levels 1-2), then counting that can't skip a single record,
-// such as everyone who reports to someone (3), everyone matching two fields (4),
-// or everyone whose manager is in a given department, which means looking up each manager too (5).
+// following a chain of managers (levels 1-2), then counting that can't skip a single record:
+// everyone whose manager is in a given department, which means looking up each one's manager (3),
+// then everyone whose manager's manager is, two lookups each (4, and 5 in a bigger directory).
 // All questions at one level share the same document, so it can be cached.
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
 type Level =
-  | { records: number; ask: "badge" | "countReports"; hops: number }
-  | { records: number; ask: "countInBuilding" | "countManagedFrom" };
+  | { records: number; ask: "badge"; hops: number }
+  | { records: number; ask: "countManagedFrom" | "countTwoUp" };
 const LEVELS: Level[] = [
   { records: 100, ask: "badge", hops: 2 },
   { records: 250, ask: "badge", hops: 3 },
-  { records: 500, ask: "countReports", hops: 2 },
-  { records: 800, ask: "countInBuilding" },
-  { records: 1200, ask: "countManagedFrom" },
+  { records: 500, ask: "countManagedFrom" },
+  { records: 800, ask: "countTwoUp" },
+  { records: 1200, ask: "countTwoUp" },
 ];
 const BUILDINGS = "ABCDEF";
 
@@ -93,55 +93,36 @@ export function generateLongContextQuestion(
     return t;
   };
 
-  if (config.ask === "badge" || config.ask === "countReports") {
-    const climb = (r: StaffRecord) => {
-      for (let k = 0; k < config.hops; k++) r = byNumber.get(r.manager)!;
-      return r;
-    };
-    const reports = (r: StaffRecord) => count((x) => x.manager === r.number);
-    // Counting needs someone with a few direct reports, so the answer depends on finding all of them.
+  if (config.ask === "badge") {
     const start = choose(
       () => rng.pick(records),
       (r) => r.name,
-      (r) => config.ask === "badge" || reports(climb(r)) >= 2,
+      () => true,
     );
-    const end = climb(start);
+    let end = start;
+    for (let k = 0; k < config.hops; k++) end = byNumber.get(end.manager)!;
     const steps = ["Go to their manager", ...Array.from({ length: config.hops - 1 }, () => "then to that person's manager")].join(", ");
-    const intro = `Using the staff directory above: start at the person named ${start.name}. ${steps}.`;
-    return config.ask === "badge"
-      ? {
-          prompt: `${intro} What is the badge code of the person you end at? Write only the badge code on the last line.`,
-          expected: end.badge,
-        }
-      : {
-          prompt: `${intro} How many people in the directory have the person you end at as their manager? ${answerNumber}`,
-          expected: String(reports(end)),
-        };
-  }
-
-  if (config.ask === "countInBuilding") {
-    const matches = ([department, building]: string[]) =>
-      count((r) => r.department === department && r.office.startsWith(`${building}-`));
-    const [department, building] = choose(
-      () => [rng.pick(DEPARTMENTS), rng.pick([...BUILDINGS])],
-      (t) => t.join(),
-      (t) => matches(t) >= 3,
-    );
     return {
-      prompt: `Using the staff directory above: how many people work in the ${department} department and have an office in building ${building} (office codes that start with "${building}-")? ${answerNumber}`,
-      expected: String(matches([department, building])),
+      prompt: `Using the staff directory above: start at the person named ${start.name}. ${steps}. What is the badge code of the person you end at? Write only the badge code on the last line.`,
+      expected: end.badge,
     };
   }
 
-  const matches = ([department, managers]: string[]) =>
-    count((r) => r.department === department && byNumber.get(r.manager)!.department === managers);
+  // How many people in one department have a manager (or a manager's manager) in another.
+  const up = config.ask === "countTwoUp" ? 2 : 1;
+  const above = (r: StaffRecord) => {
+    for (let k = 0; k < up; k++) r = byNumber.get(r.manager)!;
+    return r;
+  };
+  const matches = ([department, managers]: string[]) => count((r) => r.department === department && above(r).department === managers);
   const [department, managers] = choose(
     () => rng.shuffle(DEPARTMENTS).slice(0, 2),
     (t) => t.join(),
     (t) => matches(t) >= 3,
   );
+  const who = up === 1 ? "a manager who works" : "a manager whose own manager works";
   return {
-    prompt: `Using the staff directory above: how many people in the ${department} department have a manager who works in the ${managers} department? ${answerNumber}`,
+    prompt: `Using the staff directory above: how many people in the ${department} department have ${who} in the ${managers} department? ${answerNumber}`,
     expected: String(matches([department, managers])),
   };
 }

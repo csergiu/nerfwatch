@@ -95,10 +95,16 @@ async function submit() {
   };
 
   if (batch && provider.batch) {
-    const batchId = await provider.batch.submit(set, set.questions, settings);
-    const run = createRun({ ...base, batchId });
-    console.log(`\nSubmitted as run ${run.id} (batch ${batchId}).`);
-    return console.log("Most batches finish within an hour, at most 24h. Then run: ./nerf collect");
+    try {
+      const batchId = await provider.batch.submit(set, set.questions, settings);
+      const run = createRun({ ...base, batchId });
+      console.log(`\nSubmitted as run ${run.id} (batch ${batchId}).`);
+      return console.log("Most batches finish within an hour, at most 24h. Then run: ./nerf collect");
+    } catch (error) {
+      // OpenRouter lists a batch option for some models that its Batch API then refuses.
+      if (!/does not have a :batch endpoint/.test(String(error))) throw error;
+      console.log(`\nOpenRouter's Batch API refused ${settings.model}, so it's asked live instead, at full price.`);
+    }
   }
 
   // No batch API: ask everything now. The run's folder is claimed first, so a problem saving it

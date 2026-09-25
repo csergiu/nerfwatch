@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { costUsd } from "../src/models.ts";
 import { generateQuestionSet, grade, type Question } from "../src/questions/index.ts";
-import { gradeInstructions, type InstructionSpec } from "../src/questions/instructions.ts";
+import { generateInstructions, gradeInstructions, type InstructionSpec } from "../src/questions/instructions.ts";
+import { createRng } from "../src/questions/rng.ts";
 import { wilson } from "../src/report.ts";
 
 const set = generateQuestionSet(1);
@@ -65,6 +66,11 @@ describe("reasoning", () => {
       } else if (op === "If the first element is greater than the last, swap them; otherwise move the last element to the start.") {
         if (list[0] > list[list.length - 1]) [list[0], list[list.length - 1]] = [list[list.length - 1], list[0]];
         else list.unshift(list.pop()!);
+      } else if ((m = op.match(/^Reverse the order of the elements from position (\d+) to position (\d+)\.$/))) {
+        const [i, j] = [Number(m[1]), Number(m[2])];
+        list.splice(i - 1, j - i + 1, ...list.slice(i - 1, j).reverse());
+      } else if ((m = op.match(/^Move the last (\d+) elements to the start, keeping their order\.$/))) {
+        list.unshift(...list.splice(list.length - Number(m[1])));
       } else if ((m = op.match(/^If the list contains (\d+), remove its first occurrence; otherwise append \1\.$/))) {
         const n = Number(m[1]);
         if (list.includes(n)) list.splice(list.indexOf(n), 1);
@@ -114,10 +120,9 @@ describe("logic", () => {
         } else if ((m = sentence.match(/^If (\w+) is a knight, then (\w+) is a (knight|knave)\.$/))) {
           const [a, b, knight] = [at(m[1]), at(m[2]), m[3] === "knight"];
           holds = (k) => !k[a] || k[b] === knight;
-        } else if ((m = sentence.match(/^Exactly (\d+) of the (\d+) of us (?:is a knight|are knights)\.$/))) {
-          expect(Number(m[2])).toBe(names.length);
-          const n = Number(m[1]);
-          holds = (k) => k.filter(Boolean).length === n;
+        } else if ((m = sentence.match(/^At least (\d+) of (.+) are knights\.$/))) {
+          const [n, group] = [Number(m[1]), m[2].split(/, | and /).map(at)];
+          holds = (k) => group.filter((p) => k[p]).length >= n;
         } else if ((m = sentence.match(/^Exactly (\d+) of (.+) (?:is a|are) (knight|knave)s?\.$/))) {
           const [n, group, knight] = [Number(m[1]), m[2].split(/, | and /).map(at), m[3] === "knight"];
           holds = (k) => group.filter((p) => k[p] === knight).length === n;
@@ -148,8 +153,11 @@ describe("logic", () => {
     }
   });
 
-  it("grows from 4 to 11 people", () => {
-    for (const q of byCategory("logic")) expect(parse(q.prompt).names, q.id).toHaveLength([4, 5, 7, 9, 11][q.level - 1]);
+  it("grows from 4 to 16 people, and from level 4 nobody says outright who is a knight", () => {
+    for (const q of byCategory("logic")) {
+      expect(parse(q.prompt).names, q.id).toHaveLength([4, 5, 9, 12, 16][q.level - 1]);
+      if (q.level >= 4) expect(q.prompt, q.id).not.toMatch(/"(?:[^"]*\. )?\w+ is a (?:knight|knave)\./);
+    }
   });
 
   it("grades the names on the last line as a set", () => {
@@ -184,6 +192,14 @@ describe("code", () => {
     questions.forEach((q, k) => expect(outputs[k], q.id).toBe(q.expected));
   });
 
+  it("reads and writes a list from level 4 on, and prints it", () => {
+    for (const q of byCategory("code")) {
+      const usesList = q.prompt.includes("xs = [");
+      expect(usesList, q.id).toBe(q.level >= 4);
+      if (usesList) expect(q.prompt, q.id).toContain("print(a, b, c, d, *xs)");
+    }
+  });
+
   it("grades the numbers on the last line", () => {
     const q = byCategory("code")[0];
     expect(grade(q, q.expected).passed).toBe(true);
@@ -195,43 +211,56 @@ describe("code", () => {
 });
 
 describe("instructions", () => {
+  // Every combination of rules must be possible to satisfy.
+  function expectPossible(id: string, { lines, rules }: InstructionSpec) {
+    const letter = rules.find((r) => r.kind === "avoidLetter")?.letter;
+    for (const r of rules) {
+      if (r.kind === "acrostic" || r.kind === "telestich") {
+        expect(r.word.length, id).toBe(lines);
+        if (letter) expect(r.word.toLowerCase(), id).not.toContain(letter);
+      }
+      if (r.kind === "includeWord" && letter) expect(r.word, id).not.toContain(letter);
+    }
+    const acrostic = rules.find((r) => r.kind === "acrostic")?.word;
+    const telestich = rules.find((r) => r.kind === "telestich")?.word;
+    if (acrostic && telestich) expect(telestich, id).not.toBe(acrostic);
+    const include = rules.find((r) => r.kind === "includeWord");
+    const has = (kind: string) => rules.some((r) => r.kind === kind);
+    // With alliteration, the required word needs a line starting with its letter; with growing words
+    // too, it fits at most once per such line.
+    if (acrostic && include && has("alliteration")) expect(acrostic, id).toContain(include.word[0].toUpperCase());
+    if (include && has("alliteration") && has("increasing")) {
+      const lineCount = acrostic ? [...acrostic.toLowerCase()].filter((c) => c === include.word[0]).length : lines;
+      expect(include.times, id).toBeLessThanOrEqual(lineCount);
+    }
+    if (include && has("increasing")) expect(include.times, id).toBeLessThanOrEqual(lines);
+    // About 4 to 5 letters a word, or with growing words, more than 2 + 3 + 4 + … letters.
+    const perLine = rules.find((r) => r.kind === "wordsPerLine")?.count;
+    const letters = rules.find((r) => r.kind === "lettersPerLine")?.count;
+    if (perLine && letters && has("increasing")) {
+      expect(letters, id).toBeGreaterThan(Array.from({ length: perLine }, (_, k) => k + 2).reduce((a, b) => a + b));
+    } else if (perLine && letters) {
+      expect(letters / perLine, id).toBeGreaterThanOrEqual(4);
+      expect(letters / perLine, id).toBeLessThanOrEqual(5);
+    }
+    const noRepeat = rules.find((r) => r.kind === "noRepeat");
+    if (noRepeat && include) expect(noRepeat.except, id).toBe(include.word);
+  }
+
   it("never asks for something impossible", () => {
-    for (const q of byCategory("instructions")) {
-      const { lines, rules } = q.expected;
-      const letter = rules.find((r) => r.kind === "avoidLetter")?.letter;
-      for (const r of rules) {
-        if (r.kind === "acrostic") {
-          expect(r.word.length, q.id).toBe(lines);
-          if (letter) expect(r.word.toLowerCase(), q.id).not.toContain(letter);
-        }
-        if (r.kind === "includeWord" && letter) expect(r.word, q.id).not.toContain(letter);
-      }
-      // With alliteration, the required word needs a line starting with its letter.
-      const acrostic = rules.find((r) => r.kind === "acrostic")?.word;
-      const include = rules.find((r) => r.kind === "includeWord")?.word;
-      if (acrostic && include && rules.some((r) => r.kind === "alliteration")) {
-        expect(acrostic, q.id).toContain(include[0].toUpperCase());
-      }
-      // About 4 to 5 letters a word, or with growing words, more than 2 + 3 + 4 + … letters.
-      const perLine = rules.find((r) => r.kind === "wordsPerLine")?.count;
-      const letters = rules.find((r) => r.kind === "lettersPerLine")?.count;
-      if (perLine && letters && rules.some((r) => r.kind === "increasing")) {
-        expect(letters, q.id).toBeGreaterThan(Array.from({ length: perLine }, (_, k) => k + 2).reduce((a, b) => a + b));
-      } else if (perLine && letters) {
-        expect(letters / perLine, q.id).toBeGreaterThanOrEqual(4);
-        expect(letters / perLine, q.id).toBeLessThanOrEqual(5);
-      }
-      const noRepeat = rules.find((r) => r.kind === "noRepeat");
-      if (noRepeat && include) expect(noRepeat.except, q.id).toBe(include);
+    for (const q of byCategory("instructions")) expectPossible(q.id, q.expected);
+    // Many more combinations than one question set has, from the levels that stack the most rules.
+    for (let seed = 1; seed <= 500; seed++) {
+      for (const level of [3, 4, 5]) expectPossible(`seed ${seed} L${level}`, generateInstructions(createRng(seed), level).expected);
     }
   });
 
   it("gets harder with each level: more rules, and the hard kinds from level 3", () => {
-    const hard = new Set(["lettersPerLine", "alliteration", "noRepeat", "increasing"]);
+    const hard = new Set(["lettersPerLine", "alliteration", "noRepeat", "increasing", "telestich"]);
     for (const q of byCategory("instructions")) {
       const kinds = q.expected.rules.map((r) => r.kind);
-      expect(kinds, q.id).toHaveLength([2, 3, 4, 6, 7][q.level - 1]);
-      expect(kinds.filter((k) => hard.has(k)), q.id).toHaveLength([0, 0, 1, 2, 3][q.level - 1]);
+      expect(kinds, q.id).toHaveLength([2, 3, 4, 8, 10][q.level - 1]);
+      expect(kinds.filter((k) => hard.has(k)), q.id).toHaveLength([0, 0, 1, 4, 5][q.level - 1]);
     }
   });
 
@@ -286,6 +315,9 @@ describe("instructions", () => {
     const growing: InstructionSpec = { lines: 2, rules: [{ kind: "increasing" }] };
     expect(gradeInstructions("we saw deep, frozen crystals!\nan old barn", growing).passed).toBe(true); // 2, 3, 4, 6, 8 and 2, 3, 4
     expect(gradeInstructions("we saw deep, frozen crystals!\nthe old barn", growing).passed).toBe(false); // 3 then 3
+    const lastLetters: InstructionSpec = { lines: 3, rules: [{ kind: "telestich", word: "SUN" }] };
+    expect(gradeInstructions("the stars!\nwarm glow, lingering blu\nand then the dawn", lastLetters).passed).toBe(true); // punctuation ignored
+    expect(gradeInstructions("the stars!\nwarm glow, lingering blue\nand then the dawn", lastLetters).passed).toBe(false); // spells "sen"
   });
 });
 
@@ -299,10 +331,11 @@ describe("long context", () => {
       .map(([, number, name, department, office, badge, manager]) => ({ number, name, department, office, badge, manager }));
     const byNumber = new Map(rows.map((r) => [r.number, r]));
 
-    let m = prompt.match(/work in the (\w+) department and have an office in building (\w)/);
-    if (m) return String(rows.filter((r) => r.department === m![1] && r.office.startsWith(`${m![2]}-`)).length);
+    const managerOf = (r: (typeof rows)[number]) => byNumber.get(r.manager)!;
+    let m = prompt.match(/people in the (\w+) department have a manager whose own manager works in the (\w+) department/);
+    if (m) return String(rows.filter((r) => r.department === m![1] && managerOf(managerOf(r)).department === m![2]).length);
     m = prompt.match(/people in the (\w+) department have a manager who works in the (\w+) department/);
-    if (m) return String(rows.filter((r) => r.department === m![1] && byNumber.get(r.manager)!.department === m![2]).length);
+    if (m) return String(rows.filter((r) => r.department === m![1] && managerOf(r).department === m![2]).length);
 
     const name = prompt.match(/named (.+?)\./)![1];
     const start = rows.filter((r) => r.name === name);
@@ -310,7 +343,6 @@ describe("long context", () => {
     let person = start[0];
     const hops = 1 + (prompt.match(/then to that person's manager/g)?.length ?? 0);
     for (let k = 0; k < hops; k++) person = byNumber.get(person.manager)!;
-    if (prompt.includes("How many people")) return String(rows.filter((r) => r.manager === person.number).length);
     return person.badge;
   }
 
@@ -322,7 +354,7 @@ describe("long context", () => {
 
   it("only counts things there are a few of, and never asks the same thing twice", () => {
     const questions = byCategory("long-context");
-    for (const q of questions.filter((x) => /^\d+$/.test(x.expected))) expect(Number(q.expected), q.id).toBeGreaterThanOrEqual(2);
+    for (const q of questions.filter((x) => /^\d+$/.test(x.expected))) expect(Number(q.expected), q.id).toBeGreaterThanOrEqual(3);
     expect(new Set(questions.map((q) => q.prompt)).size).toBe(questions.length);
   });
 

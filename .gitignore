@@ -1,5 +1,7 @@
 node_modules/
 .env
+.env.deploy.local
+AGENTS.md
 
 # Your private question set and results. Never publish these:
 # anyone with the questions can train on them or special-case them.

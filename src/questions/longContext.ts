@@ -1,10 +1,18 @@
 // Long context: follow a chain of references through a large staff directory.
-// Difficulty = directory size (roughly 2k to 40k tokens).
+// Difficulty = a bigger directory (roughly 3k to 33k tokens), more steps up the chain, and from
+// level 3 on, a step back down it: finding everyone who reports to someone means reading every record.
 // All questions at one level share the same document, so it can be cached.
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
-const RECORDS_BY_LEVEL = [60, 150, 300, 600, 1200];
+type Level = { records: number; hops: number; then: "badge" | "highestReport" | "countReports" };
+const LEVELS: Level[] = [
+  { records: 100, hops: 2, then: "badge" },
+  { records: 250, hops: 3, then: "badge" },
+  { records: 500, hops: 1, then: "highestReport" },
+  { records: 800, hops: 2, then: "countReports" },
+  { records: 1200, hops: 3, then: "countReports" },
+];
 
 const FIRST_NAMES = [
   "Maren", "Tobias", "Ines", "Kofi", "Lena", "Arjun", "Sofia", "Emeka", "Hana", "Luca",
@@ -28,7 +36,7 @@ type StaffRecord = { number: number; name: string; department: string; office: s
 const pad = (n: number) => String(n).padStart(4, "0");
 
 export function generateDirectory(rng: Rng, level: number): { text: string; records: StaffRecord[] } {
-  const count = RECORDS_BY_LEVEL[level - 1];
+  const count = LEVELS[level - 1].records;
   const names = rng.shuffle(FIRST_NAMES.flatMap((f) => LAST_NAMES.map((l) => `${f} ${l}`))).slice(0, count);
 
   const badges = new Set<string>();
@@ -63,27 +71,55 @@ export function generateDirectory(rng: Rng, level: number): { text: string; reco
 
 export function generateLongContextQuestion(
   rng: Rng,
+  level: number,
   records: StaffRecord[],
   used: Set<number>,
 ): { prompt: string; expected: string } {
-  let start = rng.pick(records);
-  while (used.has(start.number)) start = rng.pick(records);
-  used.add(start.number);
-
+  const { hops, then } = LEVELS[level - 1];
   const byNumber = new Map(records.map((r) => [r.number, r]));
-  const manager = byNumber.get(start.manager)!;
-  const managersManager = byNumber.get(manager.manager)!;
+  const reportsOf = (r: StaffRecord) => records.filter((x) => x.manager === r.number);
+  const climb = (r: StaffRecord) => {
+    for (let k = 0; k < hops; k++) r = byNumber.get(r.manager)!;
+    return r;
+  };
+  // Reverse steps need someone with a few direct reports, so the answer depends on finding all of them.
+  const minReports = then === "badge" ? 0 : 2;
 
-  const prompt = [
-    `Using the staff directory above: start at the person named ${start.name}.`,
-    "Go to their manager, then to that manager's manager.",
-    "What is the badge code of the person you end at? Write only the badge code on the last line.",
-  ].join(" ");
+  let start = rng.pick(records);
+  while (used.has(start.number) || reportsOf(climb(start)).length < minReports) start = rng.pick(records);
+  used.add(start.number);
+  const end = climb(start);
 
-  return { prompt, expected: managersManager.badge };
+  const steps = ["Go to their manager", ...Array.from({ length: hops - 1 }, () => "then to that person's manager")].join(", ");
+  const intro = `Using the staff directory above: start at the person named ${start.name}. ${steps}.`;
+  switch (then) {
+    case "badge":
+      return {
+        prompt: `${intro} What is the badge code of the person you end at? Write only the badge code on the last line.`,
+        expected: end.badge,
+      };
+    case "highestReport": {
+      const highest = reportsOf(end).at(-1)!; // records are in number order
+      return {
+        prompt: `${intro} Of all the people whose manager is the person you end at, find the one with the highest record number. What is their badge code? Write only the badge code on the last line.`,
+        expected: highest.badge,
+      };
+    }
+    case "countReports":
+      return {
+        prompt: `${intro} How many people in the directory have the person you end at as their manager? Write only the number on the last line.`,
+        expected: String(reportsOf(end).length),
+      };
+  }
 }
 
+// The expected answer is either a badge code or a count.
 export function gradeLongContext(text: string, expected: string): Grade {
+  if (/^\d+$/.test(expected)) {
+    const last = text.trim().split("\n").at(-1) ?? "";
+    const got = last.match(/\d+/g)?.at(-1);
+    return got === expected ? { passed: true } : { passed: false, note: `got ${got ?? "no number"}` };
+  }
   const badge = text.match(/[A-Z]\d-\d{4}/g)?.at(-1);
   return badge === expected ? { passed: true } : { passed: false, note: `got ${badge ?? "no badge code"}` };
 }

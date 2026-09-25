@@ -12,10 +12,10 @@ It tests models from Anthropic, OpenAI, xAI and Meta through their own APIs, and
 
 | Kind | Task | Harder levels mean |
 |---|---|---|
-| reasoning | Track a list through a series of operations | 8 → 64 operations |
-| code | Predict what a small Python program prints | more variables, statements and loops |
-| instructions | Write lines that follow checkable rules (acrostic, word counts, banned letter…) | 1 → 5 rules at once |
-| long-context | Follow a chain of managers through a staff directory | ~2k → ~33k token document |
+| reasoning | Track a list through a series of operations | 12 → 90 operations; from level 2, operations that depend on the values ("remove the largest", "if the sum is even…") |
+| code | Predict what a small Python program prints | more variables, statements and loops; from level 3, bigger numbers and multiplication |
+| instructions | Write lines that follow checkable rules (acrostic, word counts, banned letter…) | 2 → 6 rules at once; from level 3, rules that need counting or planning every word (letters per line, alliteration, no repeated words) |
+| long-context | Follow a chain of managers through a staff directory | ~3k → ~33k token document, longer chains, and from level 3, finding everyone who reports to someone |
 
 **The baseline** is every finished run in the first 7 days of tracking, for the same model, effort and question set. Change any of those and a new baseline starts. For a model released before you started tracking it, reports say so and show the baseline date: you can't test the past, so scores are compared with that date, not launch day.
 
@@ -91,7 +91,7 @@ Prices live in `src/models.ts` (list prices, September 2026), with links to each
 
 ## Tune the difficulty first
 
-The first report shows how many questions the model passes at each level. A level it passes 5/5 is too easy and 0/5 is too hard; neither can show a drop. Adjust the difficulty in `src/questions/` (for example `STEPS_BY_LEVEL` in `reasoning.ts`), run `./nerf generate --force`, and only then start your baseline. With a run every day, the baseline week has 7 runs, 700 answers.
+The first report shows how many questions the model passes at each level. A level it passes 5/5 is too easy and 0/5 is too hard; neither can show a drop. Adjust the difficulty in `src/questions/` (each file has a `LEVELS` table at the top), run `./nerf generate --force`, and only then start your baseline. With a run every day, the baseline week has 7 runs, 700 answers.
 
 ## Run it on a schedule
 

@@ -1,19 +1,18 @@
 // Code: predict what a small generated Python program prints.
 // We build the program as a tree, then both render it as Python and run it
 // here, so the expected output never depends on executing anything.
-// Difficulty = more variables, statements and loop iterations.
+// Difficulty = more variables, statements and loop iterations, and from level 3 on, bigger numbers
+// (a larger modulus) and variables multiplied together, so every step is harder arithmetic.
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
-const MOD = 97;
-
-type Level = { vars: number; statements: number; loops: number[] };
+type Level = { vars: number; statements: number; loops: number[]; mod: number; multiply: boolean };
 const LEVELS: Level[] = [
-  { vars: 3, statements: 2, loops: [4] },
-  { vars: 3, statements: 3, loops: [6] },
-  { vars: 3, statements: 4, loops: [10] },
-  { vars: 4, statements: 5, loops: [15] },
-  { vars: 4, statements: 4, loops: [6, 5] },
+  { vars: 3, statements: 3, loops: [5], mod: 97, multiply: false },
+  { vars: 3, statements: 4, loops: [8], mod: 97, multiply: false },
+  { vars: 4, statements: 4, loops: [10], mod: 1009, multiply: true },
+  { vars: 4, statements: 5, loops: [4, 4], mod: 1009, multiply: true },
+  { vars: 4, statements: 5, loops: [5, 4], mod: 10007, multiply: true },
 ];
 const VAR_NAMES = ["a", "b", "c", "d"];
 const LOOP_NAMES = ["i", "j"];
@@ -22,6 +21,7 @@ type Expr =
   | { op: "add"; x: string; y: string }
   | { op: "sub"; x: string; y: string }
   | { op: "mulAdd"; x: string; k: number; y: string }
+  | { op: "mul"; x: string; y: string; k: number } // "+ k" so a 0 doesn't spread through every product
   | { op: "addLoop"; x: string; y: string; loop: string };
 type Assign = { kind: "assign"; target: string; expr: Expr };
 type IfElse = { kind: "if"; v: string; loop: string; k: number; then: Assign; else: Assign };
@@ -29,74 +29,80 @@ type Statement = Assign | IfElse;
 type Env = Record<string, number>;
 
 // Python's % always returns a non-negative result for a positive modulus.
-const pmod = (n: number) => ((n % MOD) + MOD) % MOD;
+const pmod = (n: number, mod: number) => ((n % mod) + mod) % mod;
 
-function randomAssign(rng: Rng, vars: string[], loops: string[]): Assign {
+function randomAssign(rng: Rng, vars: string[], loops: string[], multiply: boolean): Assign {
   const x = rng.pick(vars);
   const y = rng.pick(vars);
   const other = rng.pick(vars.filter((v) => v !== x)); // "x - x" would always be 0
-  const expr: Expr = rng.pick([
+  const exprs: Expr[] = [
     { op: "add", x, y },
     { op: "sub", x, y: other },
-    { op: "mulAdd", x, k: rng.int(2, 5), y },
+    { op: "mulAdd", x, k: rng.int(2, 9), y },
     { op: "addLoop", x, y, loop: rng.pick(loops) },
-  ] as Expr[]);
-  return { kind: "assign", target: rng.pick(vars), expr };
+  ];
+  if (multiply) exprs.push({ op: "mul", x, y: other, k: rng.int(1, 9) });
+  return { kind: "assign", target: rng.pick(vars), expr: rng.pick(exprs) };
 }
 
-function randomStatement(rng: Rng, vars: string[], loops: string[]): Statement {
-  if (rng.int(1, 3) > 1) return randomAssign(rng, vars, loops);
+function randomStatement(rng: Rng, vars: string[], loops: string[], multiply: boolean): Statement {
+  if (rng.int(1, 3) > 1) return randomAssign(rng, vars, loops, multiply);
   return {
     kind: "if",
     v: rng.pick(vars),
     loop: rng.pick(loops),
     k: rng.int(2, 5),
-    then: randomAssign(rng, vars, loops),
-    else: randomAssign(rng, vars, loops),
+    then: randomAssign(rng, vars, loops, multiply),
+    else: randomAssign(rng, vars, loops, multiply),
   };
 }
 
-function renderExpr(e: Expr): string {
+function renderExpr(e: Expr, mod: number): string {
   switch (e.op) {
     case "add":
-      return `(${e.x} + ${e.y}) % ${MOD}`;
+      return `(${e.x} + ${e.y}) % ${mod}`;
     case "sub":
-      return `(${e.x} - ${e.y}) % ${MOD}`;
+      return `(${e.x} - ${e.y}) % ${mod}`;
     case "mulAdd":
-      return `(${e.x} * ${e.k} + ${e.y}) % ${MOD}`;
+      return `(${e.x} * ${e.k} + ${e.y}) % ${mod}`;
+    case "mul":
+      return `(${e.x} * ${e.y} + ${e.k}) % ${mod}`;
     case "addLoop":
-      return `(${e.x} + ${e.y} * ${e.loop}) % ${MOD}`;
+      return `(${e.x} + ${e.y} * ${e.loop}) % ${mod}`;
   }
 }
 
-function renderStatement(s: Statement, indent: string): string[] {
-  if (s.kind === "assign") return [`${indent}${s.target} = ${renderExpr(s.expr)}`];
+function renderStatement(s: Statement, indent: string, mod: number): string[] {
+  if (s.kind === "assign") return [`${indent}${s.target} = ${renderExpr(s.expr, mod)}`];
   return [
     `${indent}if (${s.v} + ${s.loop}) % ${s.k} == 0:`,
-    ...renderStatement(s.then, indent + "    "),
+    ...renderStatement(s.then, indent + "    ", mod),
     `${indent}else:`,
-    ...renderStatement(s.else, indent + "    "),
+    ...renderStatement(s.else, indent + "    ", mod),
   ];
 }
 
-function evalExpr(e: Expr, env: Env): number {
+// Values stay below mod, and mod stays below 2^26, so every product here is an exact JavaScript number.
+function evalExpr(e: Expr, env: Env, mod: number): number {
   switch (e.op) {
     case "add":
-      return pmod(env[e.x] + env[e.y]);
+      return pmod(env[e.x] + env[e.y], mod);
     case "sub":
-      return pmod(env[e.x] - env[e.y]);
+      return pmod(env[e.x] - env[e.y], mod);
     case "mulAdd":
-      return pmod(env[e.x] * e.k + env[e.y]);
+      return pmod(env[e.x] * e.k + env[e.y], mod);
+    case "mul":
+      return pmod(env[e.x] * env[e.y] + e.k, mod);
     case "addLoop":
-      return pmod(env[e.x] + env[e.y] * env[e.loop]);
+      return pmod(env[e.x] + env[e.y] * env[e.loop], mod);
   }
 }
 
-function runStatement(s: Statement, env: Env) {
+function runStatement(s: Statement, env: Env, mod: number) {
   if (s.kind === "assign") {
-    env[s.target] = evalExpr(s.expr, env);
+    env[s.target] = evalExpr(s.expr, env, mod);
   } else {
-    runStatement((env[s.v] + env[s.loop]) % s.k === 0 ? s.then : s.else, env);
+    runStatement((env[s.v] + env[s.loop]) % s.k === 0 ? s.then : s.else, env, mod);
   }
 }
 
@@ -105,7 +111,7 @@ export function generateCode(rng: Rng, level: number): { prompt: string; expecte
   const vars = VAR_NAMES.slice(0, config.vars);
   const loops = LOOP_NAMES.slice(0, config.loops.length);
   const init = vars.map(() => rng.int(0, 20));
-  const body = Array.from({ length: config.statements }, () => randomStatement(rng, vars, loops));
+  const body = Array.from({ length: config.statements }, () => randomStatement(rng, vars, loops, config.multiply));
 
   // Render
   const lines = vars.map((v, k) => `${v} = ${init[k]}`);
@@ -113,7 +119,7 @@ export function generateCode(rng: Rng, level: number): { prompt: string; expecte
     lines.push(`${"    ".repeat(depth)}for ${loops[depth]} in range(${count}):`);
   });
   const bodyIndent = "    ".repeat(config.loops.length);
-  for (const s of body) lines.push(...renderStatement(s, bodyIndent));
+  for (const s of body) lines.push(...renderStatement(s, bodyIndent, config.mod));
   lines.push(`print(${vars.join(", ")})`);
   const program = lines.join("\n");
 
@@ -121,7 +127,7 @@ export function generateCode(rng: Rng, level: number): { prompt: string; expecte
   const env: Env = Object.fromEntries(vars.map((v, k) => [v, init[k]]));
   const loop = (depth: number) => {
     if (depth === config.loops.length) {
-      for (const s of body) runStatement(s, env);
+      for (const s of body) runStatement(s, env, config.mod);
       return;
     }
     for (let n = 0; n < config.loops[depth]; n++) {

@@ -53,7 +53,7 @@ export function generateQuestionSet(seed: number): QuestionSet {
               ...base,
               category,
               documentId,
-              ...generateLongContextQuestion(rng, directory!.records, usedStarts),
+              ...generateLongContextQuestion(rng, level, directory!.records, usedStarts),
             });
             break;
         }

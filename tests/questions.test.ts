@@ -48,7 +48,26 @@ describe("reasoning", () => {
         const [i, j] = [Number(m[1]) - 1, Number(m[2]) - 1];
         [list[i], list[j]] = [list[j], list[i]];
       } else if ((m = op.match(/^Add (\d+) to the element at position (\d+)\.$/))) list[Number(m[2]) - 1] += Number(m[1]);
-      else throw new Error(`Unknown operation: ${op}`);
+      else if (op === "Remove the largest element (if there's a tie, the first one).") {
+        list.splice(list.indexOf(Math.max(...list)), 1);
+      } else if (op === "Move the smallest element to the start (if there's a tie, the first one).") {
+        const [min] = list.splice(list.indexOf(Math.min(...list)), 1);
+        list.unshift(min);
+      } else if ((m = op.match(/^Subtract the element at position (\d+) from the element at position (\d+)\.$/))) {
+        list[Number(m[2]) - 1] -= list[Number(m[1]) - 1];
+      } else if ((m = op.match(/^Append the number of elements greater than (\d+)\.$/))) {
+        list.push(list.filter((v) => v > Number(m![1])).length);
+      } else if (op === "If the sum of all elements is even, reverse the list; otherwise remove the last element.") {
+        if (list.reduce((a, b) => a + b) % 2 === 0) list.reverse();
+        else list.pop();
+      } else if (op === "If the first element is greater than the last, swap them; otherwise move the last element to the start.") {
+        if (list[0] > list[list.length - 1]) [list[0], list[list.length - 1]] = [list[list.length - 1], list[0]];
+        else list.unshift(list.pop()!);
+      } else if ((m = op.match(/^If the list contains (\d+), remove its first occurrence; otherwise append \1\.$/))) {
+        const n = Number(m[1]);
+        if (list.includes(n)) list.splice(list.indexOf(n), 1);
+        else list.push(n);
+      } else throw new Error(`Unknown operation: ${op}`);
     }
     return list;
   }
@@ -110,6 +129,28 @@ describe("instructions", () => {
         }
         if (r.kind === "includeWord" && letter) expect(r.word, q.id).not.toContain(letter);
       }
+      // With alliteration, the required word needs a line starting with its letter.
+      const acrostic = rules.find((r) => r.kind === "acrostic")?.word;
+      const include = rules.find((r) => r.kind === "includeWord")?.word;
+      if (acrostic && include && rules.some((r) => r.kind === "alliteration")) {
+        expect(acrostic, q.id).toContain(include[0].toUpperCase());
+      }
+      // About 4 to 5 letters a word.
+      const perLine = rules.find((r) => r.kind === "wordsPerLine")?.count;
+      const letters = rules.find((r) => r.kind === "lettersPerLine")?.count;
+      if (perLine && letters) expect(letters / perLine, q.id).toBeGreaterThanOrEqual(4);
+      if (perLine && letters) expect(letters / perLine, q.id).toBeLessThanOrEqual(5);
+      const noRepeat = rules.find((r) => r.kind === "noRepeat");
+      if (noRepeat && include) expect(noRepeat.except, q.id).toBe(include);
+    }
+  });
+
+  it("gets harder with each level: more rules, and the hard kinds from level 3", () => {
+    const hard = new Set(["lettersPerLine", "alliteration", "noRepeat"]);
+    for (const q of byCategory("instructions")) {
+      const kinds = q.expected.rules.map((r) => r.kind);
+      expect(kinds, q.id).toHaveLength([2, 3, 4, 5, 6][q.level - 1]);
+      expect(kinds.filter((k) => hard.has(k)), q.id).toHaveLength([0, 0, 1, 1, 2][q.level - 1]);
     }
   });
 
@@ -144,6 +185,24 @@ describe("instructions", () => {
     ];
     for (const text of broken) expect(gradeInstructions(text, spec).passed, text).toBe(false);
   });
+
+  it("checks letters per line, alliteration and repeated words", () => {
+    const hard: InstructionSpec = {
+      lines: 2,
+      rules: [
+        { kind: "lettersPerLine", count: 18 },
+        { kind: "alliteration" },
+        { kind: "noRepeat", except: "gold" },
+      ],
+    };
+    const text = "gold grass glows gold\nsoft silver sand, sure";
+    expect(gradeInstructions(text, hard)).toEqual({ passed: true });
+    expect(gradeInstructions("gold grass glows gold\nsoft silver sands, sure", hard).passed).toBe(false); // 19 letters
+    expect(gradeInstructions("gold grass glows gold\nsoft silver sand, pure", hard).passed).toBe(false); // p breaks it
+    expect(gradeInstructions("gold grass glows gold\nsoft grass sand, sure", hard).passed).toBe(false); // "grass" twice
+    expect(gradeInstructions("gold grass glows gold\nsoft silver sand, sure", { lines: 2, rules: [{ kind: "noRepeat" }] }).passed).toBe(false);
+    expect(gradeInstructions("don't drift\ndo don't", { lines: 2, rules: [{ kind: "alliteration" }] }).passed).toBe(true);
+  });
 });
 
 describe("long context", () => {
@@ -157,14 +216,25 @@ describe("long context", () => {
     const name = prompt.match(/named (.+?)\./)![1];
     const start = rows.filter((r) => r.name === name);
     expect(start).toHaveLength(1);
-    const manager = rows.find((r) => r.number === start[0].manager)!;
-    return rows.find((r) => r.number === manager.manager)!.badge;
+    let person = start[0];
+    const hops = 1 + (prompt.match(/then to that person's manager/g)?.length ?? 0);
+    for (let k = 0; k < hops; k++) person = rows.find((r) => r.number === person.manager)!;
+    const reports = rows.filter((r) => r.manager === person.number);
+    if (prompt.includes("How many people")) return String(reports.length);
+    if (prompt.includes("highest record number")) return reports.sort((a, b) => Number(b.number) - Number(a.number))[0].badge;
+    return person.badge;
   }
 
-  it("expected badges match the chain in the document", () => {
+  it("expected answers match the chain in the document", () => {
     for (const q of byCategory("long-context")) {
       expect(solveFromDocument(set.documents[q.documentId!], q.prompt), q.id).toBe(q.expected);
     }
+  });
+
+  it("asks about people with several direct reports once it counts them", () => {
+    const counts = byCategory("long-context").filter((q) => q.prompt.includes("How many people"));
+    expect(counts.length).toBeGreaterThan(0);
+    for (const q of counts) expect(Number(q.expected), q.id).toBeGreaterThanOrEqual(2);
   });
 
   it("grades the last badge code in the answer", () => {
@@ -172,6 +242,14 @@ describe("long context", () => {
     expect(grade(q, `Their manager has badge A1-1111, whose manager has:\n${q.expected}`).passed).toBe(true);
     expect(grade(q, "A1-1111").passed).toBe(false);
     expect(grade(q, "I couldn't find that person.").passed).toBe(false);
+  });
+
+  it("grades the number on the last line for counts", () => {
+    const q = byCategory("long-context").find((x) => x.prompt.includes("How many people"))!;
+    const n = Number(q.expected);
+    expect(grade(q, `Records 0012 and 0450 report to them, and more.\n**${n}**`).passed).toBe(true);
+    expect(grade(q, `${n} people\nWait, one more: ${n + 1}`).passed).toBe(false);
+    expect(grade(q, "Badge K4-1234").passed).toBe(false);
   });
 });
 

@@ -8,11 +8,12 @@ It tests models from Anthropic, OpenAI, xAI and Meta through their own APIs, and
 
 ## How it works
 
-**100 questions:** 4 kinds × 5 difficulty levels × 5 questions each. Every question has one correct answer, checked by code rather than by another AI.
+**100 questions:** 5 kinds × 5 difficulty levels × 4 questions each. Every question has one correct answer, checked by code rather than by another AI.
 
 | Kind | Task | Harder levels mean |
 |---|---|---|
 | reasoning | Track a list through a series of operations | 12 → 90 operations; from level 2, operations that depend on the values ("remove the largest", "if the sum is even…") |
+| logic | Work out who always tells the truth and who always lies, from what they say (knights and knaves) | 4 → 11 people; statements that tie more of them together ("exactly 2 of…", "if… then…") |
 | code | Predict what a small Python program prints | more variables, statements and loops; from level 3, bigger numbers and multiplication |
 | instructions | Write lines that follow checkable rules (acrostic, word counts, banned letter…) | 2 → 6 rules at once; from level 3, rules that need counting or planning every word (letters per line, alliteration, no repeated words) |
 | long-context | Follow a chain of managers through a staff directory | ~3k → ~33k token document, longer chains, and from level 3, finding everyone who reports to someone |
@@ -61,7 +62,7 @@ Use the same `--model` and `--effort` for `submit` and `probe`, so the live prob
 | Meta | `muse-spark-1.3`, `muse-spark-1.2` | `META_API_KEY` | live |
 | OpenRouter | any model on OpenRouter, as `openrouter/<id>` | `OPENROUTER_API_KEY` | Batch API when the model has one, otherwise live |
 
-`./nerf models` lists the same models with their prices and the thinking levels each one accepts. Levels differ by model (xAI's stop at `xhigh`; some OpenAI models also take `none`), but every model accepts `high`, the default. Any other model name or level stops before anything is sent.
+`./nerf models` lists the same models with their prices and the thinking levels each one accepts. Levels differ by model (xAI's stop at `xhigh`; some OpenAI models also take `none`), but every model accepts `low`, the default. Low is on purpose: given more room, top models double-check their way to nearly every answer, which leaves the score nowhere to drop, and it costs more. A model that got worse still shows up at `high`, but mostly as more thinking tokens for the same score. Any other model name or level stops before anything is sent.
 
 **Full runs** go through the provider's batch API when NerfWatch uses one: results come back later through `./nerf collect`, at half price. xAI and Meta runs, and OpenRouter models without a batch option, are asked live instead, a few questions at a time, and the report prints as soon as the run finishes. xAI's batch API doesn't document its discount or result format clearly yet, and Meta doesn't have one. On xAI and Meta a full run costs roughly $1–2; on OpenRouter it depends on the model. Live runs that hit a rate limit wait a minute and ask those questions again, up to 3 times.
 

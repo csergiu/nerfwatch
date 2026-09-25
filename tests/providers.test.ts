@@ -5,7 +5,7 @@ import { usesBatchApi } from "../src/providers/index.ts";
 import { buildParams, RESPONSES_PROVIDERS, toResult, usageOf } from "../src/providers/responses.ts";
 import { costUsd, MODELS } from "../src/models.ts";
 import { generateQuestionSet } from "../src/questions/index.ts";
-import type { Settings } from "../src/run.ts";
+import { DEFAULT_SETTINGS, type Settings } from "../src/run.ts";
 
 const set = generateQuestionSet(1);
 const codeQ = set.questions.find((q) => q.category === "code")!;
@@ -31,7 +31,7 @@ function reply(parts: object[], extra: Partial<Response> = {}): Response {
 
 describe("model list", () => {
   it("lets every model use the default effort", () => {
-    for (const [id, m] of Object.entries(MODELS)) expect(m.efforts, id).toContain("high");
+    for (const [id, m] of Object.entries(MODELS)) expect(m.efforts, id).toContain(DEFAULT_SETTINGS.effort);
   });
 
   it("never includes Meta's contributor tier, which may train on what we send", () => {

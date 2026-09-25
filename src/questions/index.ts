@@ -1,5 +1,6 @@
 import { generateCode, gradeCode } from "./code.ts";
 import { generateInstructions, gradeInstructions } from "./instructions.ts";
+import { generateLogic, gradeLogic } from "./logic.ts";
 import { generateDirectory, generateLongContextQuestion, gradeLongContext } from "./longContext.ts";
 import { generateReasoning, gradeReasoning } from "./reasoning.ts";
 import { createRng } from "./rng.ts";
@@ -7,9 +8,9 @@ import type { Category, Grade, Question, QuestionSet } from "./types.ts";
 
 export type { Category, Grade, Question, QuestionSet } from "./types.ts";
 
-export const CATEGORIES: Category[] = ["reasoning", "code", "instructions", "long-context"];
+export const CATEGORIES: Category[] = ["reasoning", "logic", "code", "instructions", "long-context"];
 export const LEVELS = [1, 2, 3, 4, 5];
-const PER_LEVEL = 5; // 4 categories x 5 levels x 5 = 100 questions
+const PER_LEVEL = 4; // 5 categories x 5 levels x 4 = 100 questions
 
 // The live probe: 10 mid-difficulty questions, only one of them long-context to keep it cheap.
 const PROBE_IDS = new Set([
@@ -31,7 +32,7 @@ export function generateQuestionSet(seed: number): QuestionSet {
       const directory = category === "long-context" ? generateDirectory(rng, level) : undefined;
       const documentId = directory ? `directory-L${level}` : undefined;
       if (directory && documentId) documents[documentId] = directory.text;
-      const usedStarts = new Set<number>();
+      const asked = new Set<string>();
 
       for (let n = 1; n <= PER_LEVEL; n++) {
         const id = `${category}-L${level}-${n}`;
@@ -39,6 +40,9 @@ export function generateQuestionSet(seed: number): QuestionSet {
         switch (category) {
           case "reasoning":
             questions.push({ ...base, category, ...generateReasoning(rng, level) });
+            break;
+          case "logic":
+            questions.push({ ...base, category, ...generateLogic(rng, level) });
             break;
           case "code": {
             const { prompt, expected } = generateCode(rng, level);
@@ -53,7 +57,7 @@ export function generateQuestionSet(seed: number): QuestionSet {
               ...base,
               category,
               documentId,
-              ...generateLongContextQuestion(rng, level, directory!.records, usedStarts),
+              ...generateLongContextQuestion(rng, level, directory!.records, asked),
             });
             break;
         }
@@ -68,6 +72,8 @@ export function grade(question: Question, text: string): Grade {
   switch (question.category) {
     case "reasoning":
       return gradeReasoning(text, question.expected);
+    case "logic":
+      return gradeLogic(text, question.expected);
     case "code":
       return gradeCode(text, question.expected);
     case "instructions":

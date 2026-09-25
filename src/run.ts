@@ -3,8 +3,10 @@ import { costUsd, type TokenUsage } from "./models.ts";
 import { grade, type Category, type Grade, type Question, type QuestionSet } from "./questions/index.ts";
 
 // Every setting is pinned explicitly, so a change in the API's defaults can't look like a nerf.
+// Effort defaults to low: given more, top models double-check their way to nearly every answer,
+// which leaves a score no room to drop (and costs more).
 export type Settings = { model: string; effort: string; maxTokens: number };
-export const DEFAULT_SETTINGS: Settings = { model: "claude-opus-5", effort: "high", maxTokens: 16000 };
+export const DEFAULT_SETTINGS: Settings = { model: "claude-opus-5", effort: "low", maxTokens: 16000 };
 
 // A guess at average output (thinking included), used only for estimates before a run. Reports show the real number.
 const ASSUMED_OUTPUT_TOKENS = 1500;

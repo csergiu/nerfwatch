@@ -19,7 +19,7 @@ const hasPython = (() => {
 })();
 
 describe("question set", () => {
-  it("has 100 questions: 4 categories x 5 levels x 5, with 10 probe questions", () => {
+  it("has 100 questions: 5 categories x 5 levels x 4, with 10 probe questions", () => {
     expect(set.questions).toHaveLength(100);
     expect(new Set(set.questions.map((q) => q.id)).size).toBe(100);
     expect(set.questions.filter((q) => q.probe)).toHaveLength(10);
@@ -55,6 +55,8 @@ describe("reasoning", () => {
         list.unshift(min);
       } else if ((m = op.match(/^Subtract the element at position (\d+) from the element at position (\d+)\.$/))) {
         list[Number(m[2]) - 1] -= list[Number(m[1]) - 1];
+      } else if ((m = op.match(/^Add (\d+) to every element at an even position \(2, 4, 6 and so on\)\.$/))) {
+        for (let k = 1; k < list.length; k += 2) list[k] += Number(m[1]);
       } else if ((m = op.match(/^Append the number of elements greater than (\d+)\.$/))) {
         list.push(list.filter((v) => v > Number(m![1])).length);
       } else if (op === "If the sum of all elements is even, reverse the list; otherwise remove the last element.") {
@@ -84,6 +86,81 @@ describe("reasoning", () => {
     expect(grade(q, `First I got ${wrong}, but correcting that:\n${right}`).passed).toBe(true);
     expect(grade(q, wrong).passed).toBe(false);
     expect(grade(q, "I'm not sure.").passed).toBe(false);
+  });
+});
+
+describe("logic", () => {
+  // Reads a puzzle from its text alone: who says what, as a check on one assignment of knights.
+  function parse(prompt: string) {
+    const names = prompt.match(/You meet \d+ people: (.+)\.\n/)![1].split(/, | and /);
+    const at = (name: string) => {
+      expect(names, name).toContain(name);
+      return names.indexOf(name);
+    };
+    const checks: { speaker: number; holds: (k: boolean[]) => boolean }[] = [];
+    for (const [, speaker, said] of prompt.matchAll(/^(\w+) says: "(.+)"$/gm)) {
+      for (const sentence of said.split(/(?<=\.) /)) {
+        let m: RegExpMatchArray | null;
+        let holds: (k: boolean[]) => boolean;
+        if ((m = sentence.match(/^(\w+) is a (knight|knave)\.$/))) {
+          const [who, knight] = [at(m[1]), m[2] === "knight"];
+          holds = (k) => k[who] === knight;
+        } else if ((m = sentence.match(/^(\w+) and (\w+) are (the same kind|different kinds)\.$/))) {
+          const [a, b, same] = [at(m[1]), at(m[2]), m[3] === "the same kind"];
+          holds = (k) => (k[a] === k[b]) === same;
+        } else if ((m = sentence.match(/^At least one of (\w+) and (\w+) is a knight\.$/))) {
+          const [a, b] = [at(m[1]), at(m[2])];
+          holds = (k) => k[a] || k[b];
+        } else if ((m = sentence.match(/^If (\w+) is a knight, then (\w+) is a (knight|knave)\.$/))) {
+          const [a, b, knight] = [at(m[1]), at(m[2]), m[3] === "knight"];
+          holds = (k) => !k[a] || k[b] === knight;
+        } else if ((m = sentence.match(/^Exactly (\d+) of the (\d+) of us (?:is a knight|are knights)\.$/))) {
+          expect(Number(m[2])).toBe(names.length);
+          const n = Number(m[1]);
+          holds = (k) => k.filter(Boolean).length === n;
+        } else if ((m = sentence.match(/^Exactly (\d+) of (.+) (?:is a|are) (knight|knave)s?\.$/))) {
+          const [n, group, knight] = [Number(m[1]), m[2].split(/, | and /).map(at), m[3] === "knight"];
+          holds = (k) => group.filter((p) => k[p] === knight).length === n;
+        } else throw new Error(`Unknown statement: ${sentence}`);
+        checks.push({ speaker: at(speaker), holds });
+      }
+    }
+    return { names, checks };
+  }
+
+  const fits = (people: number, checks: ReturnType<typeof parse>["checks"]) => {
+    const found: string[] = [];
+    for (let mask = 0; mask < 1 << people; mask++) {
+      const k = Array.from({ length: people }, (_, p) => ((mask >> p) & 1) === 1);
+      if (checks.every((c) => c.holds(k) === k[c.speaker])) found.push(k.map(String).join());
+    }
+    return found;
+  };
+
+  it("has exactly one answer, the expected one, and needs every statement", () => {
+    for (const q of byCategory("logic")) {
+      const { names, checks } = parse(q.prompt);
+      const found = fits(names.length, checks);
+      expect(found, q.id).toHaveLength(1);
+      const knights = names.filter((_, p) => found[0].split(",")[p] === "true").sort();
+      expect(knights, q.id).toEqual(q.expected);
+      checks.forEach((_, k) => expect(fits(names.length, checks.toSpliced(k, 1)).length, `${q.id} without #${k}`).toBeGreaterThan(1));
+    }
+  });
+
+  it("grows from 4 to 11 people", () => {
+    for (const q of byCategory("logic")) expect(parse(q.prompt).names, q.id).toHaveLength([4, 5, 7, 9, 11][q.level - 1]);
+  });
+
+  it("grades the names on the last line as a set", () => {
+    const q = byCategory("logic")[0];
+    const knights = q.expected;
+    const knave = parse(q.prompt).names.find((n) => !knights.includes(n))!;
+    expect(grade(q, `Working it out...\n${[...knights].reverse().join(", ")}`).passed).toBe(true);
+    expect(grade(q, `Knights: ${knights.join(" and ")}.`).passed).toBe(true);
+    expect(grade(q, [...knights, knave].join(", ")).passed).toBe(false);
+    expect(grade(q, knights.slice(1).join(", ")).passed).toBe(false); // one missing
+    expect(grade(q, `${knights.join(", ")}\nLet me double-check that.`).passed).toBe(false);
   });
 });
 
@@ -135,22 +212,26 @@ describe("instructions", () => {
       if (acrostic && include && rules.some((r) => r.kind === "alliteration")) {
         expect(acrostic, q.id).toContain(include[0].toUpperCase());
       }
-      // About 4 to 5 letters a word.
+      // About 4 to 5 letters a word, or with growing words, more than 2 + 3 + 4 + … letters.
       const perLine = rules.find((r) => r.kind === "wordsPerLine")?.count;
       const letters = rules.find((r) => r.kind === "lettersPerLine")?.count;
-      if (perLine && letters) expect(letters / perLine, q.id).toBeGreaterThanOrEqual(4);
-      if (perLine && letters) expect(letters / perLine, q.id).toBeLessThanOrEqual(5);
+      if (perLine && letters && rules.some((r) => r.kind === "increasing")) {
+        expect(letters, q.id).toBeGreaterThan(Array.from({ length: perLine }, (_, k) => k + 2).reduce((a, b) => a + b));
+      } else if (perLine && letters) {
+        expect(letters / perLine, q.id).toBeGreaterThanOrEqual(4);
+        expect(letters / perLine, q.id).toBeLessThanOrEqual(5);
+      }
       const noRepeat = rules.find((r) => r.kind === "noRepeat");
       if (noRepeat && include) expect(noRepeat.except, q.id).toBe(include);
     }
   });
 
   it("gets harder with each level: more rules, and the hard kinds from level 3", () => {
-    const hard = new Set(["lettersPerLine", "alliteration", "noRepeat"]);
+    const hard = new Set(["lettersPerLine", "alliteration", "noRepeat", "increasing"]);
     for (const q of byCategory("instructions")) {
       const kinds = q.expected.rules.map((r) => r.kind);
-      expect(kinds, q.id).toHaveLength([2, 3, 4, 5, 6][q.level - 1]);
-      expect(kinds.filter((k) => hard.has(k)), q.id).toHaveLength([0, 0, 1, 1, 2][q.level - 1]);
+      expect(kinds, q.id).toHaveLength([2, 3, 4, 6, 7][q.level - 1]);
+      expect(kinds.filter((k) => hard.has(k)), q.id).toHaveLength([0, 0, 1, 2, 3][q.level - 1]);
     }
   });
 
@@ -202,39 +283,47 @@ describe("instructions", () => {
     expect(gradeInstructions("gold grass glows gold\nsoft grass sand, sure", hard).passed).toBe(false); // "grass" twice
     expect(gradeInstructions("gold grass glows gold\nsoft silver sand, sure", { lines: 2, rules: [{ kind: "noRepeat" }] }).passed).toBe(false);
     expect(gradeInstructions("don't drift\ndo don't", { lines: 2, rules: [{ kind: "alliteration" }] }).passed).toBe(true);
+    const growing: InstructionSpec = { lines: 2, rules: [{ kind: "increasing" }] };
+    expect(gradeInstructions("we saw deep, frozen crystals!\nan old barn", growing).passed).toBe(true); // 2, 3, 4, 6, 8 and 2, 3, 4
+    expect(gradeInstructions("we saw deep, frozen crystals!\nthe old barn", growing).passed).toBe(false); // 3 then 3
   });
 });
 
 describe("long context", () => {
-  // Follows the chain using only the document text the model sees.
+  // Answers each question using only the document text the model sees.
   function solveFromDocument(doc: string, prompt: string): string {
     const rows = doc
       .split("\n")
-      .map((l) => l.match(/^Record (\d+) \| Name: (.+?) \| .* \| Badge: (\S+) \| Manager: Record (\d+)$/))
+      .map((l) => l.match(/^Record (\d+) \| Name: (.+?) \| Department: (\w+) \| Office: (\S+) \| Badge: (\S+) \| Manager: Record (\d+)$/))
       .filter((m) => m !== null)
-      .map(([, number, name, badge, manager]) => ({ number, name, badge, manager }));
+      .map(([, number, name, department, office, badge, manager]) => ({ number, name, department, office, badge, manager }));
+    const byNumber = new Map(rows.map((r) => [r.number, r]));
+
+    let m = prompt.match(/work in the (\w+) department and have an office in building (\w)/);
+    if (m) return String(rows.filter((r) => r.department === m![1] && r.office.startsWith(`${m![2]}-`)).length);
+    m = prompt.match(/people in the (\w+) department have a manager who works in the (\w+) department/);
+    if (m) return String(rows.filter((r) => r.department === m![1] && byNumber.get(r.manager)!.department === m![2]).length);
+
     const name = prompt.match(/named (.+?)\./)![1];
     const start = rows.filter((r) => r.name === name);
     expect(start).toHaveLength(1);
     let person = start[0];
     const hops = 1 + (prompt.match(/then to that person's manager/g)?.length ?? 0);
-    for (let k = 0; k < hops; k++) person = rows.find((r) => r.number === person.manager)!;
-    const reports = rows.filter((r) => r.manager === person.number);
-    if (prompt.includes("How many people")) return String(reports.length);
-    if (prompt.includes("highest record number")) return reports.sort((a, b) => Number(b.number) - Number(a.number))[0].badge;
+    for (let k = 0; k < hops; k++) person = byNumber.get(person.manager)!;
+    if (prompt.includes("How many people")) return String(rows.filter((r) => r.manager === person.number).length);
     return person.badge;
   }
 
-  it("expected answers match the chain in the document", () => {
+  it("expected answers match the document", () => {
     for (const q of byCategory("long-context")) {
       expect(solveFromDocument(set.documents[q.documentId!], q.prompt), q.id).toBe(q.expected);
     }
   });
 
-  it("asks about people with several direct reports once it counts them", () => {
-    const counts = byCategory("long-context").filter((q) => q.prompt.includes("How many people"));
-    expect(counts.length).toBeGreaterThan(0);
-    for (const q of counts) expect(Number(q.expected), q.id).toBeGreaterThanOrEqual(2);
+  it("only counts things there are a few of, and never asks the same thing twice", () => {
+    const questions = byCategory("long-context");
+    for (const q of questions.filter((x) => /^\d+$/.test(x.expected))) expect(Number(q.expected), q.id).toBeGreaterThanOrEqual(2);
+    expect(new Set(questions.map((q) => q.prompt)).size).toBe(questions.length);
   });
 
   it("grades the last badge code in the answer", () => {
@@ -245,7 +334,7 @@ describe("long context", () => {
   });
 
   it("grades the number on the last line for counts", () => {
-    const q = byCategory("long-context").find((x) => x.prompt.includes("How many people"))!;
+    const q = byCategory("long-context").find((x) => /^\d+$/.test(x.expected))!;
     const n = Number(q.expected);
     expect(grade(q, `Records 0012 and 0450 report to them, and more.\n**${n}**`).passed).toBe(true);
     expect(grade(q, `${n} people\nWait, one more: ${n + 1}`).passed).toBe(false);

@@ -11,8 +11,8 @@ const LEVELS: Level[] = [
   { vars: 3, statements: 3, loops: [5], mod: 97, multiply: false },
   { vars: 3, statements: 4, loops: [8], mod: 97, multiply: false },
   { vars: 4, statements: 4, loops: [10], mod: 1009, multiply: true },
-  { vars: 4, statements: 5, loops: [4, 4], mod: 1009, multiply: true },
-  { vars: 4, statements: 5, loops: [5, 4], mod: 10007, multiply: true },
+  { vars: 4, statements: 5, loops: [4, 4], mod: 10007, multiply: true },
+  { vars: 4, statements: 5, loops: [4, 4], mod: 100003, multiply: true },
 ];
 const VAR_NAMES = ["a", "b", "c", "d"];
 const LOOP_NAMES = ["i", "j"];
@@ -82,7 +82,7 @@ function renderStatement(s: Statement, indent: string, mod: number): string[] {
   ];
 }
 
-// Values stay below mod, and mod stays below 2^26, so every product here is an exact JavaScript number.
+// Values stay below mod, so every product stays far below 2^53, where JavaScript numbers stop being exact.
 function evalExpr(e: Expr, env: Env, mod: number): number {
   switch (e.op) {
     case "add":

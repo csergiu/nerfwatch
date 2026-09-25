@@ -1,6 +1,6 @@
 // Instruction following: write a few lines that obey checkable rules.
 // Difficulty = more rules on top of "exactly N lines", and from level 3 on, rules that need
-// counting or planning every word (letters per line, alliteration, no repeated words).
+// counting or planning every word (letters per line, alliteration, no repeated words, growing words).
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
@@ -13,18 +13,19 @@ export type Rule =
   | { kind: "lowercase" }
   | { kind: "lettersPerLine"; count: number }
   | { kind: "alliteration" }
-  | { kind: "noRepeat"; except?: string };
+  | { kind: "noRepeat"; except?: string }
+  | { kind: "increasing" };
 
 export type InstructionSpec = { lines: number; rules: Rule[] };
 
 const BASIC: Rule["kind"][] = ["acrostic", "wordsPerLine", "avoidLetter", "includeWord", "endWith", "lowercase"];
-const HARD: Rule["kind"][] = ["lettersPerLine", "alliteration", "noRepeat"];
+const HARD: Rule["kind"][] = ["lettersPerLine", "alliteration", "noRepeat", "increasing"];
 const LEVELS = [
   { basic: 2, hard: 0 },
   { basic: 3, hard: 0 },
   { basic: 3, hard: 1 },
-  { basic: 4, hard: 1 },
   { basic: 4, hard: 2 },
+  { basic: 4, hard: 3 },
 ];
 
 const TOPICS = [
@@ -81,7 +82,8 @@ export function generateInstructions(rng: Rng, level: number): { prompt: string;
         text.push(`The first letters of the lines must spell "${acrostic}", in order.`);
         break;
       case "wordsPerLine":
-        wordsPerLine = rng.int(5, 8);
+        // Growing words get long quickly, so fewer of them.
+        wordsPerLine = chosen.has("increasing") ? rng.int(4, 6) : rng.int(5, 8);
         rules.push({ kind, count: wordsPerLine });
         text.push(`Each line must have exactly ${wordsPerLine} words (words are separated by spaces).`);
         break;
@@ -106,8 +108,14 @@ export function generateInstructions(rng: Rng, level: number): { prompt: string;
         text.push("Use only lowercase letters (no capital letters at all).");
         break;
       case "lettersPerLine": {
-        // About 4 to 5 letters a word, so it fits a word count too.
-        const count = wordsPerLine ? rng.int(wordsPerLine * 4, wordsPerLine * 5) : rng.int(20, 30);
+        // About 4 to 5 letters a word, so it fits a word count too. Growing words need at least
+        // 2 + 3 + 4 + … letters (1-letter words rarely fit), so a few more than that.
+        const growing = wordsPerLine && chosen.has("increasing") ? 2 * wordsPerLine + (wordsPerLine * (wordsPerLine - 1)) / 2 : 0;
+        const count = growing
+          ? rng.int(growing + 3, growing + 10)
+          : wordsPerLine
+            ? rng.int(wordsPerLine * 4, wordsPerLine * 5)
+            : rng.int(20, 30);
         rules.push({ kind, count });
         text.push(`Each line must contain exactly ${count} letters, not counting spaces or punctuation.`);
         break;
@@ -119,6 +127,10 @@ export function generateInstructions(rng: Rng, level: number): { prompt: string;
       case "noRepeat":
         rules.push({ kind, ...(include ? { except: include } : {}) });
         text.push(`Never use the same word twice${include ? ` (except "${include}")` : ""}.`);
+        break;
+      case "increasing":
+        rules.push({ kind });
+        text.push("In each line, every word must have more letters than the word before it.");
         break;
     }
   }
@@ -187,6 +199,14 @@ export function gradeInstructions(text: string, spec: InstructionSpec): Grade {
         const seen = new Set<string>();
         const repeated = new Set(words(joined).filter((w) => w !== rule.except && (seen.has(w) || !seen.add(w))));
         if (repeated.size) failures.push(`repeated ${[...repeated].map((w) => `"${w}"`).join(", ")}`);
+        break;
+      }
+      case "increasing": {
+        const bad = lines.filter((l) => {
+          const lengths = words(l).map((w) => w.replace(/['’]/g, "").length);
+          return lengths.some((n, k) => k > 0 && n <= lengths[k - 1]);
+        }).length;
+        if (bad) failures.push(`${bad} lines with words not growing`);
         break;
       }
     }

@@ -1,18 +1,23 @@
-// Long context: follow a chain of references through a large staff directory.
-// Difficulty = a bigger directory (roughly 3k to 33k tokens), more steps up the chain, and from
-// level 3 on, a step back down it: finding everyone who reports to someone means reading every record.
+// Long context: questions about a large staff directory.
+// Difficulty = a bigger directory (roughly 3k to 33k tokens) and questions that need more of it:
+// following a chain of managers (levels 1-2), then counting that can't skip a single record,
+// such as everyone who reports to someone (3), everyone matching two fields (4),
+// or everyone whose manager is in a given department, which means looking up each manager too (5).
 // All questions at one level share the same document, so it can be cached.
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
-type Level = { records: number; hops: number; then: "badge" | "highestReport" | "countReports" };
+type Level =
+  | { records: number; ask: "badge" | "countReports"; hops: number }
+  | { records: number; ask: "countInBuilding" | "countManagedFrom" };
 const LEVELS: Level[] = [
-  { records: 100, hops: 2, then: "badge" },
-  { records: 250, hops: 3, then: "badge" },
-  { records: 500, hops: 1, then: "highestReport" },
-  { records: 800, hops: 2, then: "countReports" },
-  { records: 1200, hops: 3, then: "countReports" },
+  { records: 100, ask: "badge", hops: 2 },
+  { records: 250, ask: "badge", hops: 3 },
+  { records: 500, ask: "countReports", hops: 2 },
+  { records: 800, ask: "countInBuilding" },
+  { records: 1200, ask: "countManagedFrom" },
 ];
+const BUILDINGS = "ABCDEF";
 
 const FIRST_NAMES = [
   "Maren", "Tobias", "Ines", "Kofi", "Lena", "Arjun", "Sofia", "Emeka", "Hana", "Luca",
@@ -52,7 +57,7 @@ export function generateDirectory(rng: Rng, level: number): { text: string; reco
       number: k + 1,
       name,
       department: rng.pick(DEPARTMENTS),
-      office: `${rng.pick([..."ABCDEF"])}-${rng.int(100, 499)}`,
+      office: `${rng.pick([...BUILDINGS])}-${rng.int(100, 499)}`,
       badge: badgeList[k],
       manager,
     };
@@ -73,44 +78,72 @@ export function generateLongContextQuestion(
   rng: Rng,
   level: number,
   records: StaffRecord[],
-  used: Set<number>,
+  used: Set<string>, // questions already asked about this directory
 ): { prompt: string; expected: string } {
-  const { hops, then } = LEVELS[level - 1];
+  const config = LEVELS[level - 1];
   const byNumber = new Map(records.map((r) => [r.number, r]));
-  const reportsOf = (r: StaffRecord) => records.filter((x) => x.manager === r.number);
-  const climb = (r: StaffRecord) => {
-    for (let k = 0; k < hops; k++) r = byNumber.get(r.manager)!;
-    return r;
+  const count = (match: (r: StaffRecord) => boolean) => records.filter(match).length;
+  const answerNumber = "Write only the number on the last line.";
+
+  // Picks something to ask about that hasn't been asked yet and gives a usable answer.
+  const choose = <T>(pick: () => T, key: (t: T) => string, ok: (t: T) => boolean) => {
+    let t = pick();
+    while (used.has(key(t)) || !ok(t)) t = pick();
+    used.add(key(t));
+    return t;
   };
-  // Reverse steps need someone with a few direct reports, so the answer depends on finding all of them.
-  const minReports = then === "badge" ? 0 : 2;
 
-  let start = rng.pick(records);
-  while (used.has(start.number) || reportsOf(climb(start)).length < minReports) start = rng.pick(records);
-  used.add(start.number);
-  const end = climb(start);
-
-  const steps = ["Go to their manager", ...Array.from({ length: hops - 1 }, () => "then to that person's manager")].join(", ");
-  const intro = `Using the staff directory above: start at the person named ${start.name}. ${steps}.`;
-  switch (then) {
-    case "badge":
-      return {
-        prompt: `${intro} What is the badge code of the person you end at? Write only the badge code on the last line.`,
-        expected: end.badge,
-      };
-    case "highestReport": {
-      const highest = reportsOf(end).at(-1)!; // records are in number order
-      return {
-        prompt: `${intro} Of all the people whose manager is the person you end at, find the one with the highest record number. What is their badge code? Write only the badge code on the last line.`,
-        expected: highest.badge,
-      };
-    }
-    case "countReports":
-      return {
-        prompt: `${intro} How many people in the directory have the person you end at as their manager? Write only the number on the last line.`,
-        expected: String(reportsOf(end).length),
-      };
+  if (config.ask === "badge" || config.ask === "countReports") {
+    const climb = (r: StaffRecord) => {
+      for (let k = 0; k < config.hops; k++) r = byNumber.get(r.manager)!;
+      return r;
+    };
+    const reports = (r: StaffRecord) => count((x) => x.manager === r.number);
+    // Counting needs someone with a few direct reports, so the answer depends on finding all of them.
+    const start = choose(
+      () => rng.pick(records),
+      (r) => r.name,
+      (r) => config.ask === "badge" || reports(climb(r)) >= 2,
+    );
+    const end = climb(start);
+    const steps = ["Go to their manager", ...Array.from({ length: config.hops - 1 }, () => "then to that person's manager")].join(", ");
+    const intro = `Using the staff directory above: start at the person named ${start.name}. ${steps}.`;
+    return config.ask === "badge"
+      ? {
+          prompt: `${intro} What is the badge code of the person you end at? Write only the badge code on the last line.`,
+          expected: end.badge,
+        }
+      : {
+          prompt: `${intro} How many people in the directory have the person you end at as their manager? ${answerNumber}`,
+          expected: String(reports(end)),
+        };
   }
+
+  if (config.ask === "countInBuilding") {
+    const matches = ([department, building]: string[]) =>
+      count((r) => r.department === department && r.office.startsWith(`${building}-`));
+    const [department, building] = choose(
+      () => [rng.pick(DEPARTMENTS), rng.pick([...BUILDINGS])],
+      (t) => t.join(),
+      (t) => matches(t) >= 3,
+    );
+    return {
+      prompt: `Using the staff directory above: how many people work in the ${department} department and have an office in building ${building} (office codes that start with "${building}-")? ${answerNumber}`,
+      expected: String(matches([department, building])),
+    };
+  }
+
+  const matches = ([department, managers]: string[]) =>
+    count((r) => r.department === department && byNumber.get(r.manager)!.department === managers);
+  const [department, managers] = choose(
+    () => rng.shuffle(DEPARTMENTS).slice(0, 2),
+    (t) => t.join(),
+    (t) => matches(t) >= 3,
+  );
+  return {
+    prompt: `Using the staff directory above: how many people in the ${department} department have a manager who works in the ${managers} department? ${answerNumber}`,
+    expected: String(matches([department, managers])),
+  };
 }
 
 // The expected answer is either a badge code or a count.

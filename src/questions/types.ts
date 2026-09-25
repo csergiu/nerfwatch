@@ -1,6 +1,6 @@
 import type { InstructionSpec } from "./instructions.ts";
 
-export type Category = "reasoning" | "code" | "instructions" | "long-context";
+export type Category = "reasoning" | "logic" | "code" | "instructions" | "long-context";
 
 type Base = {
   id: string; // e.g. "code-L3-2"
@@ -13,6 +13,7 @@ type Base = {
 export type Question = Base &
   (
     | { category: "reasoning"; expected: number[] }
+    | { category: "logic"; expected: string[] } // the knights' names
     | { category: "code"; expected: string }
     | { category: "instructions"; expected: InstructionSpec }
     | { category: "long-context"; expected: string }

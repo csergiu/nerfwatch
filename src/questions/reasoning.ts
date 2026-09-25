@@ -1,34 +1,34 @@
 // Reasoning: track a list through a long sequence of operations.
-// Difficulty = more operations, and from level 2 on, operations that depend on the list's values
-// (its largest element, its sum, whether it contains a number), so every earlier mistake carries forward.
+// Difficulty = more operations on a longer list, and from level 2 on, operations that depend on the
+// list's values (its largest element, its sum, whether it contains a number), so every earlier mistake
+// carries forward.
 import type { Rng } from "./rng.ts";
 import type { Grade } from "./types.ts";
 
 const BASIC = ["append", "prepend", "removeFirst", "removeLast", "reverse", "rotate", "swap", "add"] as const;
-const BY_VALUE = ["removeMax", "minToFront", "subtract", "appendCount"] as const;
+const BY_VALUE = ["removeMax", "minToFront", "subtract", "appendCount", "addAtEven"] as const;
 const CONDITIONAL = ["ifEvenSum", "ifFirstGreater", "ifContains"] as const;
 type Kind = (typeof BASIC)[number] | (typeof BY_VALUE)[number] | (typeof CONDITIONAL)[number];
 
-type Level = { steps: number; kinds: readonly Kind[] };
+type Level = { steps: number; kinds: readonly Kind[]; start: number; max: number }; // list length at the start, and at most
+const ALL = [...BASIC, ...BY_VALUE, ...CONDITIONAL];
 const LEVELS: Level[] = [
-  { steps: 12, kinds: BASIC },
-  { steps: 25, kinds: [...BASIC, ...BY_VALUE] },
-  { steps: 40, kinds: [...BASIC, ...BY_VALUE, ...CONDITIONAL] },
-  { steps: 60, kinds: [...BASIC, ...BY_VALUE, ...CONDITIONAL] },
-  { steps: 90, kinds: [...BASIC, ...BY_VALUE, ...CONDITIONAL] },
+  { steps: 12, kinds: BASIC, start: 6, max: 10 },
+  { steps: 25, kinds: [...BASIC, ...BY_VALUE], start: 6, max: 10 },
+  { steps: 40, kinds: ALL, start: 8, max: 12 },
+  { steps: 60, kinds: ALL, start: 10, max: 14 },
+  { steps: 80, kinds: ALL, start: 12, max: 16 },
 ];
-const START_LENGTH = 6;
 const MIN_LENGTH = 3;
-const MAX_LENGTH = 10;
 
 const sum = (list: number[]) => list.reduce((a, b) => a + b, 0);
 
 export function generateReasoning(rng: Rng, level: number): { prompt: string; expected: number[] } {
-  const { steps, kinds } = LEVELS[level - 1];
-  const start = Array.from({ length: START_LENGTH }, () => rng.int(1, 9));
+  const { steps, kinds, start: length, max } = LEVELS[level - 1];
+  const start = Array.from({ length }, () => rng.int(1, 9));
   const list = [...start];
   const ops: string[] = [];
-  const canGrow = () => list.length < MAX_LENGTH;
+  const canGrow = () => list.length < max;
   const canShrink = () => list.length > MIN_LENGTH;
 
   while (ops.length < steps) {
@@ -102,6 +102,12 @@ export function generateReasoning(rng: Rng, level: number): { prompt: string; ex
         const n = rng.int(3, 12);
         list.push(list.filter((v) => v > n).length);
         ops.push(`Append the number of elements greater than ${n}.`);
+        break;
+      }
+      case "addAtEven": {
+        const n = rng.int(1, 9);
+        for (let k = 1; k < list.length; k += 2) list[k] += n;
+        ops.push(`Add ${n} to every element at an even position (2, 4, 6 and so on).`);
         break;
       }
       case "ifEvenSum":

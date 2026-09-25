@@ -15,7 +15,7 @@ type Price = { input: number; cachedInput: number; cacheWrite?: number; output: 
 export type ModelInfo = {
   provider: Provider;
   name: string;
-  efforts: readonly string[]; // accepted --effort values; all models accept "high", the default
+  efforts: readonly string[]; // accepted --effort values; all models accept "low", the default
   price: Price;
   batch?: boolean; // OpenRouter models only: whether full runs can use its Batch API
 };

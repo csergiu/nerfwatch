@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs the NerfWatch CLI. Reads ANTHROPIC_API_KEY from .env if present.
+cd "$(dirname "$0")" || exit 1
+if [ -f .env ]; then exec node --env-file=.env src/cli.ts "$@"; fi
+exec node src/cli.ts "$@"

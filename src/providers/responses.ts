@@ -9,7 +9,7 @@ import { MODELS } from "../models.ts";
 import type { Question, QuestionSet } from "../questions/index.ts";
 import { answerResult, errorResult, stopwatch, type ProviderClient, type Result, type Settings } from "../run.ts";
 
-type ResponsesProvider = Exclude<Provider, "anthropic">;
+type ResponsesProvider = Exclude<Provider, "anthropic" | "openrouter">;
 
 type Config = {
   label: string;

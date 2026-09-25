@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { findTrack } from "./analysis.ts";
 import { MODELS, modelInfo } from "./models.ts";
 import { PROVIDER_LABELS, providerFor, usesBatchApi } from "./providers/index.ts";
+import { isOpenRouterModel, registerOpenRouterModel } from "./providers/openrouter.ts";
 import { generateQuestionSet, type Question, type QuestionSet } from "./questions/index.ts";
 import { batchReport, probeReport } from "./report.ts";
 import { DEFAULT_SETTINGS, estimateCost, type ProviderClient, type Result, type Settings } from "./run.ts";
@@ -23,7 +24,8 @@ Commands:
 
 Options:
   --yes             Actually send requests. Without it, submit and probe only show the estimated cost.
-  --model <id>      Default: ${DEFAULT_SETTINGS.model}. See ./nerf models
+  --model <id>      Default: ${DEFAULT_SETTINGS.model}. See ./nerf models, or use any
+                    OpenRouter model as openrouter/<id>[@provider]
   --effort <level>  How much the model may think; levels depend on the model (default: ${DEFAULT_SETTINGS.effort})
   --seed <n>        generate only (default: a random secret seed)
   --force           generate only: replace the existing question set
@@ -43,8 +45,9 @@ const { values, positionals } = parseArgs({
   },
 });
 
-function settingsFromFlags(): Settings {
+async function settingsFromFlags(): Promise<Settings> {
   const model = values.model ?? DEFAULT_SETTINGS.model;
+  if (isOpenRouterModel(model)) await registerOpenRouterModel(model); // looks it up in OpenRouter's model list
   const { efforts } = modelInfo(model); // fails early for models we don't know
   const effort = values.effort ?? DEFAULT_SETTINGS.effort;
   if (!efforts.includes(effort)) throw new Error(`--effort for ${model} must be one of: ${efforts.join(", ")}`);
@@ -92,7 +95,7 @@ async function askLive(provider: ProviderClient, questions: Question[], set: Que
 
 async function submit() {
   const set = loadQuestionSet();
-  const settings = settingsFromFlags();
+  const settings = await settingsFromFlags();
   const batch = usesBatchApi(settings.model);
   const how = batch ? "via the Batch API" : `live (${PROVIDER_LABELS[modelInfo(settings.model).provider]} runs have no batch discount)`;
   printEstimate(set.questions.length, estimateCost(set, set.questions, settings, batch), settings, how);
@@ -115,10 +118,11 @@ async function submit() {
     return console.log("Most batches finish within an hour, at most 24h. Then run: ./nerf collect");
   }
 
-  // No batch API: ask everything now. The run is only saved once it's complete.
+  // No batch API: ask everything now. The run's folder is claimed first, so a problem saving it
+  // shows up before anything is paid for; its results are saved once every question is answered.
+  const run = createRun(base);
   console.log("");
   const results = await askLive(provider, set.questions, set, settings);
-  const run = createRun(base);
   saveResults(run.id, results);
   console.log(`\n${batchReport(run, results, probeIds(set), findTrack(run))}`);
 }
@@ -163,7 +167,7 @@ async function collect() {
 
 async function probe() {
   const set = loadQuestionSet();
-  const settings = settingsFromFlags();
+  const settings = await settingsFromFlags();
   const questions = set.questions.filter((q) => q.probe);
   printEstimate(questions.length, estimateCost(set, questions, settings, false), settings, "live");
   if (!values.yes) return console.log("\nNothing sent. Run again with --yes to send.");
@@ -216,6 +220,7 @@ async function models() {
   const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
   for (const row of rows) console.log(row.map((cell, c) => cell.padEnd(widths[c])).join("   ").trimEnd());
   console.log("\nFull runs through a batch API cost half these prices. Each provider needs its API key in .env (see .env.example).");
+  console.log("Any OpenRouter model also works, as openrouter/<id>, e.g. openrouter/google/gemini-3.1-pro (see README).");
 }
 
 const commands: Record<string, () => Promise<void>> = { generate, submit, collect, probe, report, models };

@@ -31,4 +31,10 @@ describe("run ids", () => {
     ]);
     expect(listRuns().map((r) => r.settings.model).sort()).toEqual(["gpt-6-astra", "grok-4.7", "grok-4.7"]);
   });
+
+  it("turn OpenRouter ids into a single folder name", () => {
+    const run = createRun(meta("openrouter/google/gemini-3.1-pro@google-vertex"));
+    expect(run.id).toBe("2026-09-25T0600-openrouter_google_gemini-3.1-pro@google-vertex-batch");
+    expect(listRuns().some((r) => r.id === run.id)).toBe(true);
+  });
 });

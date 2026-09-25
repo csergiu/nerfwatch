@@ -62,6 +62,7 @@ export function answerResult(
   settings: Settings,
   servedModel: string,
   batch: boolean,
+  reportedCostUsd?: number, // when the provider says what it charged, use that instead of our price table
 ): Result {
   let g: Grade;
   if (stopReason === "refusal") g = { passed: false, note: "refused" };
@@ -79,7 +80,7 @@ export function answerResult(
     servedModel,
     answer,
     usage,
-    costUsd: costUsd(settings.model, usage, batch),
+    costUsd: reportedCostUsd ?? costUsd(settings.model, usage, batch),
   };
 }
 

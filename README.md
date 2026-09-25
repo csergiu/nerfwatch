@@ -1,10 +1,10 @@
 # NerfWatch
 
-Checks whether an AI model has gotten worse ("nerfed") since you started watching it. It asks the model the same private, automatically graded questions on a schedule and compares each result with a fixed baseline.
+Checks whether an AI model has gotten worse ("nerfed") since you started watching it. It asks the model the same automatically graded questions on a schedule and compares each result with a fixed baseline.
 
-It tests models from Anthropic, OpenAI, xAI and Meta through their APIs, one model per run. You choose which; see [Choosing a model](#choosing-a-model).
+It tests models from Anthropic, OpenAI, xAI and Meta through their own APIs, and any model on OpenRouter, one model per run. Each model gets a full test every day. You choose which; see [Choosing a model](#choosing-a-model).
 
-**See the results at [nerfwatch.lol](https://nerfwatch.lol).** This repository is the engine behind it: run it yourself to watch the models you care about, with your own private questions.
+**See the results at [nerfwatch.lol](https://nerfwatch.lol).** This repository is the engine behind it: run it yourself to watch the models you care about, with your own questions.
 
 ## How it works
 
@@ -32,7 +32,7 @@ Needs Node 24 or later.
 ```bash
 npm install
 cp .env.example .env    # then add the API key for each provider you'll test
-./nerf generate         # creates your private question set in data/
+./nerf generate         # creates your question set in data/
 ./nerf submit           # dry run: shows the estimated cost, sends nothing
 ./nerf submit --yes     # sends the 100 questions to Claude Opus 5 through the Batch API (half price)
 ./nerf collect          # once batches are done (usually within an hour): grades them and prints the reports
@@ -59,12 +59,18 @@ Use the same `--model` and `--effort` for `submit` and `probe`, so the live prob
 | OpenAI | `gpt-6-astra`, `gpt-6-sol`, `gpt-5.5` | `OPENAI_API_KEY` | Batch API, half price |
 | xAI | `grok-4.7`, `grok-4.6` | `XAI_API_KEY` | live |
 | Meta | `muse-spark-1.3`, `muse-spark-1.2` | `META_API_KEY` | live |
+| OpenRouter | any model on OpenRouter, as `openrouter/<id>` | `OPENROUTER_API_KEY` | live |
 
 `./nerf models` lists the same models with their prices and the thinking levels each one accepts. Levels differ by model (xAI's stop at `xhigh`; some OpenAI models also take `none`), but every model accepts `high`, the default. Any other model name or level stops before anything is sent.
 
-**Full runs** go through the provider's batch API when NerfWatch uses one: results come back later through `./nerf collect`, at half price. xAI and Meta runs are asked live instead, a few questions at a time, and the report prints as soon as the run finishes. xAI's batch API doesn't document its discount or result format clearly yet, and Meta doesn't have one. Both are cheap: a full run costs roughly $1–2.
+**Full runs** go through the provider's batch API when NerfWatch uses one: results come back later through `./nerf collect`, at half price. xAI, Meta and OpenRouter runs are asked live instead, a few questions at a time, and the report prints as soon as the run finishes. xAI's batch API doesn't document its discount or result format clearly yet, and Meta and OpenRouter don't have one. On xAI and Meta a full run costs roughly $1–2; on OpenRouter it depends on the model.
 
-**Meta:** only the Standard tier is supported. Meta's cheaper `-contributor` models may be trained on what you send them, which would put your private questions into their training data.
+**OpenRouter:** use the model's OpenRouter id with `openrouter/` in front, for example `--model openrouter/google/gemini-3.1-pro`. Its name, release date and prices come from OpenRouter's model list, and each answer's cost is what OpenRouter reports it charged. Thinking levels are OpenRouter's: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; use `none` for models that don't think.
+
+- **Pin the provider.** OpenRouter can serve a model from different companies and switch between them, and a different provider can score differently, which would look like a nerf. Add `@<provider>` to pin one, for example `openrouter/google/gemini-3.1-pro@google-vertex`, and fallbacks are turned off. Pinned and unpinned runs get separate baselines. When OpenRouter says which provider served an answer, that's saved with it too.
+- **Privacy.** Every request asks OpenRouter to skip providers that may keep or train on your prompts (`data_collection: deny`), and providers that would ignore the thinking level.
+
+**Meta:** only the Standard tier is supported. Meta's cheaper `-contributor` models may be trained on what you send them, including your questions.
 
 **Testing several models:** run `submit` and `probe` once per model. Each model and effort level gets its own baseline and verdict, since scores are only compared with the same model's earlier runs, never with other models. Costs add up per model. One `./nerf collect` fetches every finished batch, whichever model it's for, and lists the ones still processing.
 
@@ -72,28 +78,28 @@ Use the same `--model` and `--effort` for `submit` and `probe`, so the live prob
 
 ## Cost
 
-`submit` and `probe` show an estimate and send nothing unless you add `--yes`. For example, on Claude Opus 5 the estimate is about $3 for a batch run of 100 questions and $0.40 for a live probe. How much the model thinks is the biggest factor, so check the first report for the real number. Each report gives the real cost and projects a monthly cost per model for a run every 2nd day.
+`submit` and `probe` show an estimate and send nothing unless you add `--yes`. For example, on Claude Opus 5 the estimate is about $3 for a batch run of 100 questions and $0.40 for a live probe. How much the model thinks is the biggest factor, so check the first report for the real number. Each report gives the real cost and projects a monthly cost per model for a run every day.
 
 Prices live in `src/models.ts` (list prices, September 2026), with links to each provider's pricing page. Update them when they change.
 
-## Keep your questions private
+## Your question set
 
-- The generators are public; your seed isn't. `generate` picks a random seed and saves it in `data/questions.json`. Don't publish `data/` or `runs/` (they're gitignored). If your questions leak, they can end up in training data.
+- `generate` picks a random seed and saves it with the questions in `data/questions.json`. The generators are public, so the seed is what makes your set different from anyone else's. `data/` and `runs/` are gitignored, so they don't end up in a commit by accident.
 - Don't regenerate after your baseline starts. New questions can't be compared with old scores, so `generate` won't overwrite an existing set without `--force`.
-- The provider still sees every question you send. That's true of any benchmark run through an API.
+- Every question goes to the company that answers it, or through OpenRouter to whichever provider serves it.
 
 ## Tune the difficulty first
 
-The first report shows how many questions the model passes at each level. A level it passes 5/5 is too easy and 0/5 is too hard; neither can show a drop. Adjust the difficulty in `src/questions/` (for example `STEPS_BY_LEVEL` in `reasoning.ts`), run `./nerf generate --force`, and only then start your baseline. For a steadier baseline, run more often in the first week, about 10 runs.
+The first report shows how many questions the model passes at each level. A level it passes 5/5 is too easy and 0/5 is too hard; neither can show a drop. Adjust the difficulty in `src/questions/` (for example `STEPS_BY_LEVEL` in `reasoning.ts`), run `./nerf generate --force`, and only then start your baseline. With a run every day, the baseline week has 7 runs, 700 answers.
 
 ## Run it on a schedule
 
-For example, a run every 2nd day with cron:
+For example, a full run every day with cron:
 
 ```
-0 6 */2 * *          cd /path/to/nerf-watch && ./nerf submit --yes
-0 12 */2 * *         cd /path/to/nerf-watch && ./nerf collect
-0 0,6,12,18 */2 * *  cd /path/to/nerf-watch && ./nerf probe --yes
+0 6 * * *          cd /path/to/nerf-watch && ./nerf submit --yes
+0 12 * * *         cd /path/to/nerf-watch && ./nerf collect
+0 0,6,12,18 * * *  cd /path/to/nerf-watch && ./nerf probe --yes
 ```
 
 This tests the default model. For another model, add `--model <id>` to the `submit` and `probe` lines, and give each model its own lines. The single `collect` line covers all of them; a batch that isn't done yet is picked up on the next run.
@@ -110,7 +116,7 @@ This tests the default model. For another model, add `--model <id>` to the `subm
 |---|---|
 | `src/questions/` | Question generators and graders, one file per kind |
 | `src/models.ts` | Every supported model: provider, thinking levels, prices |
-| `src/providers/` | One client per API: `anthropic.ts` for Claude, `responses.ts` for OpenAI, xAI and Meta |
+| `src/providers/` | One client per API: `anthropic.ts` for Claude, `responses.ts` for OpenAI, xAI and Meta, `openrouter.ts` for OpenRouter |
 | `src/run.ts` | What all providers share: runs, results, grading an answer, cost estimates |
 | `src/analysis.ts` | Baselines, comparisons and verdicts |
 | `src/report.ts` | The plain-text reports |
@@ -131,7 +137,7 @@ Pull requests are welcome: new models and providers, new kinds of questions, bet
 
 **Rules for pull requests**
 
-- **Never include your private data:** your question set or its seed, run results, or anything else from `data/` or `runs/`. (The tests use seed 1 on purpose, as a public example.) Leaked questions can end up in training data, which makes them useless for everyone. No API keys either, not even expired ones.
+- **Never include your own data:** your question set or its seed, run results, or anything else from `data/` or `runs/`. (The tests use seed 1 on purpose, as a public example.) No API keys either, not even expired ones.
 - **Tests run offline.** They can't call a real API, need a key, or cost money. Use recorded or hand-written responses, like `tests/providers.test.ts` does.
 - **`npm test` and `npm run typecheck` pass.** Add tests for what you change. New generators and graders need tests showing the expected answers are right and that wrong answers fail.
 - **Say so if scores could shift.** A change to a grader, a generator, or the default settings can move scores for the same model, which looks like the model changed when it didn't. Call it out in the pull request so it can go in the release notes.

@@ -4,7 +4,7 @@ import { CATEGORIES, type Category } from "./questions/index.ts";
 import { listRuns, loadResults } from "./store.ts";
 
 export const BASELINE_DAYS = 7; // finished batch runs in the first week form the baseline
-export const RECENT_RUNS = 3; // compared against the baseline: about 6 days at one run every 2nd day
+export const RECENT_RUNS = 3; // compared against the baseline: the last 3 days, at one run a day
 export const LAUNCH_WINDOW_DAYS = 7; // a baseline this close to release counts as a launch baseline
 
 const DAY_MS = 86_400_000;

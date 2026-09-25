@@ -25,7 +25,8 @@ export function saveQuestionSet(set: QuestionSet, force: boolean): string {
 // models started in the same minute don't collide. Creating the folder claims the id.
 export function createRun(meta: Omit<RunMeta, "id">): RunMeta {
   const stamp = meta.createdAt.slice(0, 16).replace(/:/g, "");
-  const base = `${stamp}-${meta.settings.model}-${meta.kind}`;
+  const model = meta.settings.model.replace(/[^a-zA-Z0-9.@-]/g, "_"); // OpenRouter ids contain "/"
+  const base = `${stamp}-${model}-${meta.kind}`;
   fs.mkdirSync(RUNS_DIR, { recursive: true });
   for (let n = 1; ; n++) {
     const id = n === 1 ? base : `${base}-${n}`;

@@ -4,9 +4,11 @@
 //   OpenAI     https://developers.openai.com/api/docs/pricing
 //   xAI        https://docs.x.ai/developers/models
 //   Meta       https://dev.meta.ai/docs/pricing-rate-limits
+// OpenRouter models ("openrouter/...") aren't listed here: they're added at run time from
+// OpenRouter's model list (src/providers/openrouter.ts), and their cost comes from OpenRouter itself.
 // Our longest prompt is ~33k tokens, well below the long-context surcharges some providers add.
 
-export type Provider = "anthropic" | "openai" | "xai" | "meta";
+export type Provider = "anthropic" | "openai" | "xai" | "meta" | "openrouter";
 
 type Price = { input: number; cachedInput: number; cacheWrite?: number; output: number };
 

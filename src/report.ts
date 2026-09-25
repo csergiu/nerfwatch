@@ -3,8 +3,8 @@ import { baselineSentence, verdictSentence, type Track } from "./analysis.ts";
 import type { Result, RunMeta } from "./run.ts";
 import { CATEGORIES, LEVELS } from "./questions/index.ts";
 
-// The schedule the monthly projection assumes: a run every 2nd day, the live probe 4 times on run days.
-const RUNS_PER_MONTH = 15;
+// The schedule the monthly projection assumes: a full run every day, the live probe 4 times a day.
+const RUNS_PER_MONTH = 30;
 const PROBES_PER_RUN_DAY = 4;
 
 const usd = (x: number) => `$${x.toFixed(2)}`;
@@ -95,10 +95,10 @@ export function batchReport(run: RunMeta, results: Result[], probeIds: Set<strin
   const monthlyBatch = fullRunCost * RUNS_PER_MONTH;
   const monthlyProbe = probeCost * PROBES_PER_RUN_DAY * RUNS_PER_MONTH;
   lines.push(
-    `Projected cost per model per month, with a run every 2nd day (${RUNS_PER_MONTH} runs):`,
+    `Projected cost per model per month, with a run every day (${RUNS_PER_MONTH} runs):`,
     ...table([
       [`  Full run: ${run.questionIds.length} questions × ${RUNS_PER_MONTH} runs`, usd(monthlyBatch)],
-      [`  Live probe: 10 questions × ${PROBES_PER_RUN_DAY} a day × ${RUNS_PER_MONTH} run days`, usd(monthlyProbe)],
+      [`  Live probe: 10 questions × ${PROBES_PER_RUN_DAY} a day × ${RUNS_PER_MONTH} days`, usd(monthlyProbe)],
       ["  Total", `~${usd(monthlyBatch + monthlyProbe)}`],
     ]),
     "  (probe estimate uses this run's probe questions at live prices)",
